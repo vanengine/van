@@ -50,7 +50,7 @@ Cargo workspace with 8 crates (version managed at workspace level in root `Cargo
 
 | Crate | Purpose |
 |---|---|
-| `van-cli` | CLI binary (`van init`, `van dev`, `van build`, `van generate`) |
+| `van-cli` | CLI binary (`van init`, `van dev`, `van generate`) |
 | `van-context` | Project context and configuration |
 | `van-dev` | Dev server with hot reload |
 | `van-init` | Project scaffolding |
@@ -100,5 +100,5 @@ Two execution modes:
 
 Two workflows, both triggered by pushes to `Cargo.toml` or `crates/**`:
 
-- `.github/workflows/release.yml` — pushes to `main`: version check → create git tag → build WASM + native binaries + CLI binaries (linux x64/arm64, macOS x64/arm64, Windows x64) → GitHub Release → dispatch to `van-spring-boot-starter`
+- `.github/workflows/release.yml` — pushes to `main`: version check → create git tag → build WASM + native binaries + CLI binaries (linux x64/arm64, macOS x64/arm64, Windows x64) → GitHub Release → publish to crates.io → dispatch to `van-spring-boot-starter`
 - `.github/workflows/dev-release.yml` — pushes to `dev`: build WASM + native binaries + CLI binaries → GitHub pre-release (version: `{base}-dev.{run_number}`) → dispatch to `van-spring-boot-starter`

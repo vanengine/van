@@ -1,0 +1,18 @@
+[package]
+name = "van"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Van template engine CLI — Vue SFC syntax for server-side HTML rendering"
+keywords = ["van", "template", "cli", "vue", "ssr"]
+categories = ["command-line-utilities", "template-engine"]
+
+[[bin]]
+name = "van"
+path = "src/main.rs"
+
+[dependencies]
+van-cli = { workspace = true }
+tokio = { workspace = true }

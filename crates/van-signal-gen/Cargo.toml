@@ -2,6 +2,12 @@
 name = "van-signal-gen"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Signal-based JavaScript code generator for Van template engine"
+keywords = ["van", "signals", "codegen", "javascript", "reactive"]
+categories = ["template-engine", "compilers"]
 
 [dependencies]
 regex = { workspace = true }
