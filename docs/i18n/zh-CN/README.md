@@ -1,7 +1,7 @@
 <h1 align="center">Van</h1>
 
 <p align="center">
-  <strong>使用 Vue SFC 语法的语言无关模板引擎</strong><br>
+  <strong>使用 Vue 语法的语言无关模板引擎</strong><br>
   服务端 HTML 渲染 · 信号响应式客户端交互 · WASM 驱动
 </p>
 
@@ -16,9 +16,7 @@
   <a href="#特性">特性</a> ·
   <a href="#安装">安装</a> ·
   <a href="#使用">使用</a> ·
-  <a href="#示例">示例</a> ·
-  <a href="#架构">架构</a> ·
-  <a href="#从源码构建">构建</a>
+  <a href="#示例">示例</a>
 </p>
 
 <p align="center">
@@ -29,7 +27,7 @@
 
 ## 特性
 
-- **Vue SFC 语法** — 使用熟悉的 `<template>`、`<script setup>`、`<style scoped>` 编写模板
+- **Vue 语法** — 使用熟悉的 `<template>`、`<script setup>`、`<style scoped>` 编写模板
 - **信号响应式** — 轻量客户端交互，直接 DOM 更新（~4KB 运行时）
 
 ## 安装
@@ -54,7 +52,7 @@ van generate               # 静态站点生成
 
 Van 通过 WASM 二进制将 `.van` 文件编译为 HTML，可集成到多个后端：
 
-- **Spring Boot** — [van-spring-boot-starter](https://github.com/vanengine/van-spring-boot-starter)
+- **Spring Boot** — [van-spring-boot-starter](https://github.com/van-java/van-spring-boot-starter)
 
 ## 示例
 
@@ -75,57 +73,9 @@ h1 { color: steelblue; }
 
 服务端的 `{{ title }}` 由宿主框架插值；`count` 成为响应式信号，在客户端自动更新 DOM。
 
-## 架构
-
-```
-.van 文件 → [van-parser] → VanBlock
-                              ├── [van-compiler] → 服务端 HTML（含 {{ expr }}）
-                              └── [van-signal-gen] → 信号响应式 JS（直接 DOM 操作）
-```
-
-**核心引擎**（`crates/`）
-
-| Crate | 用途 |
-|---|---|
-| `van-parser` | 手写递归下降解析器，解析 `.van` 文件 |
-| `van-compiler` | 编排服务端 HTML + 客户端 JS 编译 |
-| `van-compiler-wasi` | WASM 入口（JSON stdin/stdout 协议） |
-| `van-signal-gen` | `<script setup>` → 信号响应式直接 DOM JS |
-
-**CLI 工具链**（`crates/van-cli/`）
-
-| Crate | 用途 |
-|---|---|
-| `van-cli` | CLI 二进制（`van init`、`van dev`、`van generate`） |
-| `van-context` | 项目上下文与配置 |
-| `van-dev` | 开发服务器（热重载） |
-| `van-init` | 项目脚手架 |
-
-<a id="从源码构建"></a>
-<details>
-<summary><strong>从源码构建</strong></summary>
-
-前置条件：[Rust 工具链](https://rustup.rs/)（1.70+）
-
-```bash
-# 构建所有 crate
-cargo build --release
-
-# 构建 CLI 二进制
-cargo build --release -p van-cli
-
-# 构建 WASM 二进制（用于框架集成）
-cargo build --target wasm32-wasip1 -p van-compiler-wasi --release
-
-# 运行测试
-cargo test
-```
-
-</details>
-
 ## 相关项目
 
-- [**van-spring-boot-starter**](https://github.com/vanengine/van-spring-boot-starter) — Spring Boot 集成
+- [**van-spring-boot-starter**](https://github.com/van-java/van-spring-boot-starter) — Spring Boot 集成
 
 ## 许可证
 

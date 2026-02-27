@@ -1,7 +1,7 @@
 <h1 align="center">Van</h1>
 
 <p align="center">
-  <strong>Language-agnostic template engine with Vue SFC syntax</strong><br>
+  <strong>Language-agnostic template engine with Vue syntax</strong><br>
   Server-side HTML rendering · Signal-based client interactivity · WASM-powered
 </p>
 
@@ -16,9 +16,7 @@
   <a href="#features">Features</a> ·
   <a href="#installation">Installation</a> ·
   <a href="#usage">Usage</a> ·
-  <a href="#example">Example</a> ·
-  <a href="#architecture">Architecture</a> ·
-  <a href="#build-from-source">Build</a>
+  <a href="#example">Example</a>
 </p>
 
 <p align="center">
@@ -29,7 +27,7 @@
 
 ## Features
 
-- **Vue SFC Syntax** — Write templates with familiar `<template>`, `<script setup>`, `<style scoped>` blocks
+- **Vue Syntax** — Write templates with familiar `<template>`, `<script setup>`, `<style scoped>` blocks
 - **Signal-based Reactivity** — Lightweight client-side interactivity with direct DOM updates (~4KB runtime)
 
 ## Installation
@@ -54,7 +52,7 @@ van generate               # Static site generation
 
 Van compiles `.van` files to HTML via a WASM binary — integrate with multiple backends:
 
-- **Spring Boot** — [van-spring-boot-starter](https://github.com/vanengine/van-spring-boot-starter)
+- **Spring Boot** — [van-spring-boot-starter](https://github.com/van-java/van-spring-boot-starter)
 
 ## Example
 
@@ -75,57 +73,9 @@ h1 { color: steelblue; }
 
 Server-side `{{ title }}` is interpolated by the host framework; `count` becomes a reactive signal with automatic DOM updates on the client.
 
-## Architecture
-
-```
-.van file → [van-parser] → VanBlock
-                              ├── [van-compiler] → Server HTML with {{ expr }}
-                              └── [van-signal-gen] → Signal-based JS (direct DOM ops)
-```
-
-**Core Engine** (`crates/`)
-
-| Crate | Purpose |
-|---|---|
-| `van-parser` | Hand-written recursive descent parser for `.van` files |
-| `van-compiler` | Orchestrates server HTML + client JS compilation |
-| `van-compiler-wasi` | WASM entry point (JSON stdin/stdout protocol) |
-| `van-signal-gen` | `<script setup>` → signal-based direct DOM JS |
-
-**CLI Toolchain** (`crates/van-cli/`)
-
-| Crate | Purpose |
-|---|---|
-| `van-cli` | CLI binary (`van init`, `van dev`, `van generate`) |
-| `van-context` | Project context and configuration |
-| `van-dev` | Dev server with hot reload |
-| `van-init` | Project scaffolding |
-
-<a id="build-from-source"></a>
-<details>
-<summary><strong>Build from Source</strong></summary>
-
-Prerequisites: [Rust toolchain](https://rustup.rs/) (1.70+)
-
-```bash
-# Build all crates
-cargo build --release
-
-# Build CLI binary
-cargo build --release -p van-cli
-
-# Build WASM binary (for framework integration)
-cargo build --target wasm32-wasip1 -p van-compiler-wasi --release
-
-# Run tests
-cargo test
-```
-
-</details>
-
 ## Related
 
-- [**van-spring-boot-starter**](https://github.com/vanengine/van-spring-boot-starter) — Spring Boot integration
+- [**van-spring-boot-starter**](https://github.com/van-java/van-spring-boot-starter) — Spring Boot integration
 
 ## License
 
