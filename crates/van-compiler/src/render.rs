@@ -77,7 +77,7 @@ pub struct PageAssets {
 /// 3. `cleanup_html()` → strip directives, interpolate remaining {{ }}, producing clean HTML
 /// 4. Inject styles + scripts into clean HTML
 ///
-/// Unlike `ym-dev-server`'s render, this does NOT inject `client.js` (WebSocket live reload).
+/// Unlike `van-dev-server`'s render, this does NOT inject `client.js` (WebSocket live reload).
 pub fn render_page(resolved: &ResolvedComponent, data: &Value) -> Result<String, String> {
     let style_block: String = resolved
         .styles
@@ -439,6 +439,6 @@ mod tests {
         assert!(html.contains("<h1>Hello</h1>"));
         assert!(html.contains("h1 { color: red; }"));
         // Should NOT contain client.js WebSocket reload
-        assert!(!html.contains("__yummy/ws"));
+        assert!(!html.contains("__van/ws"));
     }
 }
