@@ -1,5 +1,5 @@
 [workspace.package]
-version = "0.1.14"
+version = "0.1.15"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/vanengine/van"
@@ -20,13 +20,13 @@ members = [
 
 [workspace.dependencies]
 # Internal crates — core engine
-van-parser = { version = "0.1.14", path = "crates/van-parser" }
-van-signal-gen = { version = "0.1.14", path = "crates/van-signal-gen" }
-van-compiler = { version = "0.1.14", path = "crates/van-compiler" }
+van-parser = { version = "0.1.15", path = "crates/van-parser" }
+van-signal-gen = { version = "0.1.15", path = "crates/van-signal-gen" }
+van-compiler = { version = "0.1.15", path = "crates/van-compiler" }
 # Internal crates — CLI
-van-context = { version = "0.1.14", path = "crates/van-cli/crates/van-context" }
-van-dev = { version = "0.1.14", path = "crates/van-cli/crates/van-dev" }
-van-init = { version = "0.1.14", path = "crates/van-cli/crates/van-init" }
+van-context = { version = "0.1.15", path = "crates/van-cli/crates/van-context" }
+van-dev = { version = "0.1.15", path = "crates/van-cli/crates/van-dev" }
+van-init = { version = "0.1.15", path = "crates/van-cli/crates/van-init" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
