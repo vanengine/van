@@ -30,10 +30,7 @@
 ## Features
 
 - **Vue SFC Syntax** — Write templates with familiar `<template>`, `<script setup>`, `<style scoped>` blocks
-- **Zero Node.js Dependency** — Core written in Rust, compiles to WASM for backend integration
-- **Signal-based Reactivity** — Lightweight client-side interactivity with direct DOM updates (~4KB runtime, no virtual DOM)
-- **Framework-agnostic** — WASM compiler integrates with any backend via JSON stdin/stdout protocol
-- **Cross-platform** — Pre-built WASM + native binaries for Linux x64/ARM64, macOS x64/ARM64, and Windows x64
+- **Signal-based Reactivity** — Lightweight client-side interactivity with direct DOM updates (~4KB runtime)
 
 ## Installation
 
@@ -43,7 +40,7 @@
 curl -fsSL https://raw.githubusercontent.com/vanengine/van/main/install.sh | sh
 ```
 
-**Manual download**: grab the latest `van-cli-*` binary from [GitHub Releases](https://github.com/vanengine/van/releases) and place it in your `PATH`.
+**Manual download**: grab the latest `van-*` binary from [GitHub Releases](https://github.com/vanengine/van/releases) and place it in your `PATH`.
 
 ## Usage
 
@@ -55,11 +52,9 @@ van generate               # Static site generation
 
 ### Framework Integration
 
-Van compiles `.van` files to HTML via a WASM binary — integrate with any backend:
+Van compiles `.van` files to HTML via a WASM binary — integrate with multiple backends:
 
 - **Spring Boot** — [van-spring-boot-starter](https://github.com/vanengine/van-spring-boot-starter)
-
-See [WASM Integration](#build-from-source) below for the raw JSON protocol.
 
 ## Example
 
@@ -125,28 +120,6 @@ cargo build --target wasm32-wasip1 -p van-compiler-wasi --release
 # Run tests
 cargo test
 ```
-
-</details>
-
-<details>
-<summary><strong>WASM Integration</strong></summary>
-
-The WASM compiler receives JSON via stdin and returns compiled HTML:
-
-```jsonc
-// Input
-{ "entry_path": "pages/index.van", "files": { ... }, "mock_data_json": "..." }
-
-// Output
-{ "ok": true, "html": "<h1>{{ title }}</h1>..." }
-```
-
-Two execution modes:
-
-- **Single-shot** (default) — reads stdin, compiles once, writes response
-- **Daemon** (`--daemon`) — JSON Lines protocol, stays alive until stdin EOF
-
-Host frameworks perform a second pass to interpolate `{{ expr }}` with server-side model data.
 
 </details>
 

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// A loaded Van project, providing file collection and mock data utilities.
+/// A loaded Van project, providing file collection and data utilities.
 #[derive(Clone)]
 pub struct VanProject {
     pub root: PathBuf,
@@ -54,11 +54,11 @@ impl VanProject {
         Ok(files)
     }
 
-    /// Load page-specific mock data from `mock/index.json`.
+    /// Load page-specific data from `data/index.json`.
     ///
     /// Tries page-specific key first (e.g. `"pages/index"`), falls back to root object.
-    pub fn load_mock_data(&self, page_key: &str) -> Value {
-        let all = self.load_all_mock_data();
+    pub fn load_data(&self, page_key: &str) -> Value {
+        let all = self.load_all_data();
         if let Some(page_data) = all.get(page_key) {
             page_data.clone()
         } else {
@@ -66,10 +66,10 @@ impl VanProject {
         }
     }
 
-    /// Load all mock data from `mock/index.json`.
-    pub fn load_all_mock_data(&self) -> Value {
-        let mock_path = self.root.join("mock/index.json");
-        let content = match fs::read_to_string(&mock_path) {
+    /// Load all data from `data/index.json`.
+    pub fn load_all_data(&self) -> Value {
+        let data_path = self.root.join("data/index.json");
+        let content = match fs::read_to_string(&data_path) {
             Ok(c) => c,
             Err(_) => return Value::Object(Default::default()),
         };

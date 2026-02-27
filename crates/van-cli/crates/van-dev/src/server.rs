@@ -1,4 +1,4 @@
-use crate::render::{render_from_files, validate_mock_data};
+use crate::render::{render_from_files, validate_data};
 use crate::watcher;
 use anyhow::{Context, Result};
 use axum::extract::ws::{Message, WebSocket};
@@ -88,18 +88,18 @@ fn render_page(project: &VanProject, page: &str) -> Html<String> {
         return Html(not_found_html(page));
     }
 
-    let mock_data = project.load_mock_data(&format!("pages/{page}"));
+    let data = project.load_data(&format!("pages/{page}"));
 
-    // Validate mock data against defineProps (warning-only)
+    // Validate data against defineProps (warning-only)
     if let Some(source) = files.get(&entry) {
         let blocks = van_parser::parse_blocks(source);
         if !blocks.props.is_empty() {
             let label = format!("pages/{page}.van");
-            validate_mock_data(&blocks.props, &mock_data, &label);
+            validate_data(&blocks.props, &data, &label);
         }
     }
 
-    match render_from_files(&entry, &files, &mock_data, &HashMap::new()) {
+    match render_from_files(&entry, &files, &data, &HashMap::new()) {
         Ok(html) => Html(html),
         Err(e) => Html(error_html(&format!("{e:#}"))),
     }

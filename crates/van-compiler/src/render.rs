@@ -37,7 +37,7 @@ fn inject_before_close(html: &mut String, close_tag: &str, content: &str) {
     }
 }
 
-/// Augment mock data with initial signal values from `<script setup>`.
+/// Augment data with initial signal values from `<script setup>`.
 ///
 /// This allows `cleanup_html()` to replace reactive `{{ count }}` with `0`
 /// instead of leaving raw mustache tags in the output (bad for SEO).
@@ -52,7 +52,7 @@ fn augment_data_with_signals(data: &Value, script_setup: Option<&str>) -> Value 
     let mut augmented = data.clone();
     if let Value::Object(ref mut map) = augmented {
         for (name, value) in initial_values {
-            // Don't override existing mock data (server data takes priority)
+            // Don't override existing data (server data takes priority)
             if !map.contains_key(&name) {
                 map.insert(name, Value::String(value));
             }
@@ -323,7 +323,26 @@ fn cleanup_html(html: &str, data: &Value) -> String {
     result
 }
 
-/// Perform `{{ expr }}` interpolation with dot-path resolution against JSON data.
+/// Escape HTML special characters in text content.
+pub fn escape_html(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => result.push_str("&amp;"),
+            '<' => result.push_str("&lt;"),
+            '>' => result.push_str("&gt;"),
+            '"' => result.push_str("&quot;"),
+            '\'' => result.push_str("&#39;"),
+            _ => result.push(ch),
+        }
+    }
+    result
+}
+
+/// Perform `{{ expr }}` / `{{{ expr }}}` interpolation with dot-path resolution.
+///
+/// - `{{ expr }}` — HTML-escaped output (default, safe)
+/// - `{{{ expr }}}` — raw output (no escaping, for trusted HTML content)
 ///
 /// Supports paths like `user.name` which resolve to `data["user"]["name"]`.
 /// Unresolved expressions are left as-is.
@@ -333,17 +352,30 @@ pub fn interpolate(template: &str, data: &Value) -> String {
 
     while let Some(start) = rest.find("{{") {
         result.push_str(&rest[..start]);
-        let after_open = &rest[start + 2..];
 
-        if let Some(end) = after_open.find("}}") {
-            let expr = after_open[..end].trim();
-            let value = resolve_path(data, expr);
-            result.push_str(&value);
-            rest = &after_open[end + 2..];
+        // Check for triple mustache {{{ }}} (raw, unescaped output)
+        if rest[start..].starts_with("{{{") {
+            let after_open = &rest[start + 3..];
+            if let Some(end) = after_open.find("}}}") {
+                let expr = after_open[..end].trim();
+                let value = resolve_path(data, expr);
+                result.push_str(&value);
+                rest = &after_open[end + 3..];
+            } else {
+                result.push_str("{{{");
+                rest = &rest[start + 3..];
+            }
         } else {
-            // No closing }}, push the {{ and move on
-            result.push_str("{{");
-            rest = after_open;
+            let after_open = &rest[start + 2..];
+            if let Some(end) = after_open.find("}}") {
+                let expr = after_open[..end].trim();
+                let value = resolve_path(data, expr);
+                result.push_str(&escape_html(&value));
+                rest = &after_open[end + 2..];
+            } else {
+                result.push_str("{{");
+                rest = after_open;
+            }
         }
     }
     result.push_str(rest);
@@ -424,6 +456,30 @@ mod tests {
         assert!(!clean.contains("Transition"));
         assert!(!clean.contains("transition"));
         assert!(clean.contains("<p"));
+    }
+
+    #[test]
+    fn test_interpolate_escapes_html() {
+        let data = json!({"desc": "<script>alert('xss')</script>"});
+        assert_eq!(
+            interpolate("{{ desc }}", &data),
+            "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;"
+        );
+    }
+
+    #[test]
+    fn test_interpolate_triple_mustache_raw() {
+        let data = json!({"html": "<b>bold</b>"});
+        assert_eq!(interpolate("{{{ html }}}", &data), "<b>bold</b>");
+    }
+
+    #[test]
+    fn test_interpolate_mixed_escaped_and_raw() {
+        let data = json!({"safe": "<b>bold</b>", "text": "<em>hi</em>"});
+        assert_eq!(
+            interpolate("{{{ safe }}} and {{ text }}", &data),
+            "<b>bold</b> and &lt;em&gt;hi&lt;/em&gt;"
+        );
     }
 
     #[test]

@@ -83,7 +83,7 @@ Additional entry points: `compile_single()` for single-file compilation without 
 
 ## WASM Integration
 
-The WASM compiler (`van-compiler-wasi`) receives JSON via stdin: `{ entry_path, files, mock_data_json, asset_prefix, debug, file_origins }` and returns `{ ok, html?, assets?, error? }`. When `asset_prefix` is provided, CSS/JS are emitted as separate assets. Host frameworks perform a second pass to interpolate `{{ expr }}` with server-side model data.
+The WASM compiler (`van-compiler-wasi`) receives JSON via stdin: `{ entry_path, files, data_json, asset_prefix, debug, file_origins }` and returns `{ ok, html?, assets?, error? }`. When `asset_prefix` is provided, CSS/JS are emitted as separate assets. Host frameworks perform a second pass to interpolate `{{ expr }}` with server-side model data.
 
 Two execution modes:
 - **Single-shot** (default): reads all stdin, compiles once, writes response
@@ -93,8 +93,14 @@ Two execution modes:
 
 - `.van` files follow Vue 3 SFC syntax: `<template>`, `<script setup>`, `<style scoped>`
 - PascalCase imports → kebab-case in templates (`UserCard` → `<user-card />`)
-- Mock data lives in `mock/index.json`, keyed by page path (e.g., `"pages/index"`)
+- Page data lives in `data/index.json`, keyed by page path (e.g., `"pages/index"`)
 - Theme inheritance via `theme.json` in `van.themes/` directory
+- Signal primitives in `<script setup>`: `ref()`, `computed()`, `watch()`
+- Supported directives: `@click`, `v-show`, `v-if`, `v-html`, `v-text`, `:class`
+- Slots: `<slot>` and named `<slot name="...">` in layout components
+- `defineProps({ name: String })` for prop declarations
+- Dev server runs on port 3000 by default; watches `src/` and `data/` for `.van`, `.json`, `.css` changes
+- Static generation: `index.van` → `dist/index.html`, `other.van` → `dist/other/index.html`
 
 ## CI/CD
 

@@ -34,12 +34,12 @@ fn inject_before_close(html: &mut String, close_tag: &str, content: &str) {
 pub fn render_from_files(
     entry_path: &str,
     files: &HashMap<String, String>,
-    mock_data: &Value,
+    data: &Value,
     file_origins: &HashMap<String, String>,
 ) -> Result<String> {
-    let mock_json = serde_json::to_string(mock_data)?;
+    let data_json = serde_json::to_string(data)?;
     let mut html =
-        van_compiler::compile_page_debug(entry_path, files, &mock_json, file_origins)
+        van_compiler::compile_page_debug(entry_path, files, &data_json, file_origins)
             .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let client_script = format!("<script>{CLIENT_JS}</script>");
@@ -51,14 +51,14 @@ pub fn render_from_files(
 pub fn render_static_from_files(
     entry_path: &str,
     files: &HashMap<String, String>,
-    mock_data: &Value,
+    data: &Value,
 ) -> Result<String> {
-    let mock_json = serde_json::to_string(mock_data)?;
-    van_compiler::compile_page(entry_path, files, &mock_json)
+    let data_json = serde_json::to_string(data)?;
+    van_compiler::compile_page(entry_path, files, &data_json)
         .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
-/// Validate mock data against `defineProps` declarations.
+/// Validate data against `defineProps` declarations.
 ///
 /// Prints warnings to stderr for:
 /// - Missing required props
@@ -66,7 +66,7 @@ pub fn render_static_from_files(
 /// - Type mismatches (String vs Number vs Boolean vs Array vs Object)
 ///
 /// Never blocks rendering -- warnings only.
-pub(crate) fn validate_mock_data(props: &[PropDef], data: &Value, page_label: &str) {
+pub(crate) fn validate_data(props: &[PropDef], data: &Value, page_label: &str) {
     let yellow = "\x1b[33m";
     let reset = "\x1b[0m";
 
@@ -92,7 +92,7 @@ pub(crate) fn validate_mock_data(props: &[PropDef], data: &Value, page_label: &s
     for key in map.keys() {
         if !prop_names.contains(key.as_str()) {
             eprintln!(
-                "{yellow}  \u{26a0} {page_label}: extra mock key \"{key}\" not in defineProps{reset}"
+                "{yellow}  \u{26a0} {page_label}: extra data key \"{key}\" not in defineProps{reset}"
             );
         }
     }
@@ -169,7 +169,7 @@ h1 { color: red; }
         assert!(!html.contains("__van/ws"), "Static output should not have live reload");
     }
 
-    // --- validate_mock_data tests ---
+    // --- validate_data tests ---
 
     #[test]
     fn test_validate_all_good() {
@@ -179,7 +179,7 @@ h1 { color: red; }
         ];
         let data = json!({"title": "Hello", "count": 42});
         // Should produce no warnings (no panic)
-        validate_mock_data(&props, &data, "pages/index.van");
+        validate_data(&props, &data, "pages/index.van");
     }
 
     #[test]
@@ -188,7 +188,7 @@ h1 { color: red; }
             PropDef { name: "user".into(), prop_type: Some("Object".into()), required: true },
         ];
         let data = json!({});
-        validate_mock_data(&props, &data, "pages/index.van");
+        validate_data(&props, &data, "pages/index.van");
     }
 
     #[test]
@@ -197,7 +197,7 @@ h1 { color: red; }
             PropDef { name: "title".into(), prop_type: Some("String".into()), required: false },
         ];
         let data = json!({"title": "Hi", "typo": "oops"});
-        validate_mock_data(&props, &data, "pages/index.van");
+        validate_data(&props, &data, "pages/index.van");
     }
 
     #[test]
@@ -206,7 +206,7 @@ h1 { color: red; }
             PropDef { name: "count".into(), prop_type: Some("Number".into()), required: false },
         ];
         let data = json!({"count": "not a number"});
-        validate_mock_data(&props, &data, "pages/index.van");
+        validate_data(&props, &data, "pages/index.van");
     }
 
     #[test]

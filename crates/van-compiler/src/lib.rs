@@ -16,9 +16,9 @@ pub use resolve::resolve_with_files_debug;
 pub fn compile_page(
     entry_path: &str,
     files: &HashMap<String, String>,
-    mock_data_json: &str,
+    data_json: &str,
 ) -> Result<String, String> {
-    compile_page_with_debug(entry_path, files, mock_data_json, false, &HashMap::new())
+    compile_page_with_debug(entry_path, files, data_json, false, &HashMap::new())
 }
 
 /// Like `compile_page`, but with debug HTML comments at component/slot boundaries.
@@ -27,20 +27,20 @@ pub fn compile_page(
 pub fn compile_page_debug(
     entry_path: &str,
     files: &HashMap<String, String>,
-    mock_data_json: &str,
+    data_json: &str,
     file_origins: &HashMap<String, String>,
 ) -> Result<String, String> {
-    compile_page_with_debug(entry_path, files, mock_data_json, true, file_origins)
+    compile_page_with_debug(entry_path, files, data_json, true, file_origins)
 }
 
 fn compile_page_with_debug(
     entry_path: &str,
     files: &HashMap<String, String>,
-    mock_data_json: &str,
+    data_json: &str,
     debug: bool,
     file_origins: &HashMap<String, String>,
 ) -> Result<String, String> {
-    let data: serde_json::Value = serde_json::from_str(mock_data_json)
+    let data: serde_json::Value = serde_json::from_str(data_json)
         .map_err(|e| format!("Invalid JSON: {e}"))?;
     let resolved = if debug {
         resolve::resolve_with_files_debug(entry_path, files, &data, file_origins)?
@@ -57,10 +57,10 @@ fn compile_page_with_debug(
 pub fn compile_page_assets(
     entry_path: &str,
     files: &HashMap<String, String>,
-    mock_data_json: &str,
+    data_json: &str,
     asset_prefix: &str,
 ) -> Result<PageAssets, String> {
-    compile_page_assets_with_debug(entry_path, files, mock_data_json, asset_prefix, false, &HashMap::new())
+    compile_page_assets_with_debug(entry_path, files, data_json, asset_prefix, false, &HashMap::new())
 }
 
 /// Like `compile_page_assets`, but with debug HTML comments at component/slot boundaries.
@@ -69,22 +69,22 @@ pub fn compile_page_assets(
 pub fn compile_page_assets_debug(
     entry_path: &str,
     files: &HashMap<String, String>,
-    mock_data_json: &str,
+    data_json: &str,
     asset_prefix: &str,
     file_origins: &HashMap<String, String>,
 ) -> Result<PageAssets, String> {
-    compile_page_assets_with_debug(entry_path, files, mock_data_json, asset_prefix, true, file_origins)
+    compile_page_assets_with_debug(entry_path, files, data_json, asset_prefix, true, file_origins)
 }
 
 fn compile_page_assets_with_debug(
     entry_path: &str,
     files: &HashMap<String, String>,
-    mock_data_json: &str,
+    data_json: &str,
     asset_prefix: &str,
     debug: bool,
     file_origins: &HashMap<String, String>,
 ) -> Result<PageAssets, String> {
-    let data: serde_json::Value = serde_json::from_str(mock_data_json)
+    let data: serde_json::Value = serde_json::from_str(data_json)
         .map_err(|e| format!("Invalid JSON: {e}"))?;
     let resolved = if debug {
         resolve::resolve_with_files_debug(entry_path, files, &data, file_origins)?
@@ -101,10 +101,10 @@ fn compile_page_assets_with_debug(
 /// Compile a single `.van` file source into a full HTML page.
 ///
 /// Convenience wrapper: wraps the source into a single-file map and calls `compile_page`.
-pub fn compile_single(source: &str, mock_data_json: &str) -> Result<String, String> {
+pub fn compile_single(source: &str, data_json: &str) -> Result<String, String> {
     let mut files = HashMap::new();
     files.insert("main.van".to_string(), source.to_string());
-    compile_page("main.van", &files, mock_data_json)
+    compile_page("main.van", &files, data_json)
 }
 
 #[cfg(feature = "wasm")]
@@ -115,7 +115,7 @@ use wasm_bindgen::prelude::*;
 pub fn compile_van(
     entry_path: &str,
     files_json: &str,
-    mock_data_json: &str,
+    data_json: &str,
 ) -> Result<String, JsValue> {
     // Parse files_json: {"filename": "content", ...}
     let files_value: serde_json::Value = serde_json::from_str(files_json)
@@ -133,7 +133,7 @@ pub fn compile_van(
         files.insert(key.clone(), content.to_string());
     }
 
-    compile_page(entry_path, &files, mock_data_json).map_err(|e| JsValue::from_str(&e))
+    compile_page(entry_path, &files, data_json).map_err(|e| JsValue::from_str(&e))
 }
 
 #[cfg(test)]
@@ -147,8 +147,8 @@ mod tests {
   <h1>{{ title }}</h1>
 </template>
 "#;
-        let mock = r#"{"title": "Hello World"}"#;
-        let html = compile_single(source, mock).unwrap();
+        let data = r#"{"title": "Hello World"}"#;
+        let html = compile_single(source, data).unwrap();
         assert!(html.contains("<h1>Hello World</h1>"));
         assert!(html.contains("<!DOCTYPE html>"));
     }
@@ -168,8 +168,8 @@ const count = ref(0)
 function increment() { count.value++ }
 </script>
 "#;
-        let mock = r#"{}"#;
-        let html = compile_single(source, mock).unwrap();
+        let data = r#"{}"#;
+        let html = compile_single(source, data).unwrap();
         assert!(html.contains("Van"));
         assert!(!html.contains("@click"));
         assert!(html.contains("effect"));
@@ -229,8 +229,8 @@ h1 { color: green; }
             .to_string(),
         );
 
-        let mock = r#"{"title": "Van"}"#;
-        let html = compile_page("index.van", &files, mock).unwrap();
+        let data = r#"{"title": "Van"}"#;
+        let html = compile_page("index.van", &files, data).unwrap();
         assert!(html.contains("<h1>Hello, Van!</h1>"));
         assert!(html.contains("color: green"));
     }
@@ -265,8 +265,8 @@ return { formatDate: formatDate };"#
         );
         // types.ts is NOT in files map — type-only imports are erased, so it's fine
 
-        let mock = r#"{}"#;
-        let html = compile_page("index.van", &files, mock).unwrap();
+        let data = r#"{}"#;
+        let html = compile_page("index.van", &files, data).unwrap();
         // Should contain the inlined module code
         assert!(html.contains("__mod_0"));
         assert!(html.contains("formatDate"));
@@ -295,8 +295,8 @@ const count = ref(0)
             .to_string(),
         );
 
-        let mock = r#"{}"#;
-        let html = compile_page("index.van", &files, mock).unwrap();
+        let data = r#"{}"#;
+        let html = compile_page("index.van", &files, data).unwrap();
         // No module should be inlined (type-only)
         assert!(!html.contains("__mod_"));
         // Signal code still works

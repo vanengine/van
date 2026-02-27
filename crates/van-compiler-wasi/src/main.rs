@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 struct CompileRequest {
     entry_path: String,
     files: HashMap<String, String>,
-    mock_data_json: String,
+    data_json: String,
     #[serde(default)]
     asset_prefix: Option<String>,
     #[serde(default)]
@@ -34,7 +34,7 @@ fn compile(req: CompileRequest) -> CompileResponse {
             van_compiler::compile_page_assets_debug(
                 &req.entry_path,
                 &req.files,
-                &req.mock_data_json,
+                &req.data_json,
                 prefix,
                 &req.file_origins,
             )
@@ -42,7 +42,7 @@ fn compile(req: CompileRequest) -> CompileResponse {
             van_compiler::compile_page_assets(
                 &req.entry_path,
                 &req.files,
-                &req.mock_data_json,
+                &req.data_json,
                 prefix,
             )
         };
@@ -65,11 +65,11 @@ fn compile(req: CompileRequest) -> CompileResponse {
             van_compiler::compile_page_debug(
                 &req.entry_path,
                 &req.files,
-                &req.mock_data_json,
+                &req.data_json,
                 &req.file_origins,
             )
         } else {
-            van_compiler::compile_page(&req.entry_path, &req.files, &req.mock_data_json)
+            van_compiler::compile_page(&req.entry_path, &req.files, &req.data_json)
         };
         match compile_result {
             Ok(html) => CompileResponse {

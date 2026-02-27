@@ -84,7 +84,7 @@ pub fn scaffold_project(project_dir: &Path, name: &str) -> Result<Vec<String>> {
         "src/components",
         "src/layouts",
         "src/assets",
-        "mock",
+        "data",
     ];
     for dir in &dirs {
         fs::create_dir_all(project_dir.join(dir))
@@ -118,12 +118,12 @@ pub fn scaffold_project(project_dir: &Path, name: &str) -> Result<Vec<String>> {
     )?;
     created_files.push("src/layouts/default.van".into());
 
-    // mock/index.json
+    // data/index.json
     fs::write(
-        project_dir.join("mock/index.json"),
-        include_str!("templates/mock/index.json"),
+        project_dir.join("data/index.json"),
+        include_str!("templates/data/index.json"),
     )?;
-    created_files.push("mock/index.json".into());
+    created_files.push("data/index.json".into());
 
     // .gitignore
     fs::write(

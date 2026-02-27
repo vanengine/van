@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use van_parser::{add_scope_class, parse_blocks, parse_imports, parse_script_imports, scope_css, scope_id, VanImport};
 
-use crate::render::{interpolate, resolve_path as resolve_json_path};
+use crate::render::{escape_html, interpolate, resolve_path as resolve_json_path};
 
 const MAX_DEPTH: usize = 10;
 
@@ -364,50 +364,71 @@ pub fn extract_reactive_names(script: &str) -> Vec<String> {
     names
 }
 
-/// Interpolate `{{ expr }}` but leave reactive expressions as-is.
+/// Interpolate `{{ expr }}` / `{{{ expr }}}` but leave reactive expressions as-is.
+///
+/// - `{{ expr }}` — HTML-escaped output (default, safe)
+/// - `{{{ expr }}}` — raw output (no escaping, for trusted HTML content)
 fn interpolate_skip_reactive(template: &str, data: &Value, reactive_names: &[String]) -> String {
     let mut result = String::with_capacity(template.len());
     let mut rest = template;
 
+    // Closure: check if expression references any reactive signal
+    let check_reactive = |expr: &str| -> bool {
+        reactive_names.iter().any(|name| {
+            let bytes = expr.as_bytes();
+            let name_bytes = name.as_bytes();
+            let name_len = name.len();
+            let mut i = 0;
+            while i + name_len <= bytes.len() {
+                if &bytes[i..i + name_len] == name_bytes {
+                    let before_ok = i == 0 || !(bytes[i - 1] as char).is_alphanumeric();
+                    let after_ok = i + name_len == bytes.len()
+                        || !(bytes[i + name_len] as char).is_alphanumeric();
+                    if before_ok && after_ok {
+                        return true;
+                    }
+                }
+                i += 1;
+            }
+            false
+        })
+    };
+
     while let Some(start) = rest.find("{{") {
         result.push_str(&rest[..start]);
-        let after_open = &rest[start + 2..];
 
-        if let Some(end) = after_open.find("}}") {
-            let expr = after_open[..end].trim();
-
-            // Check if expression references any reactive signal
-            let is_reactive = reactive_names.iter().any(|name| {
-                let bytes = expr.as_bytes();
-                let name_bytes = name.as_bytes();
-                let name_len = name.len();
-                let mut i = 0;
-                let mut found = false;
-                while i + name_len <= bytes.len() {
-                    if &bytes[i..i + name_len] == name_bytes {
-                        let before_ok = i == 0 || !(bytes[i - 1] as char).is_alphanumeric();
-                        let after_ok = i + name_len == bytes.len()
-                            || !(bytes[i + name_len] as char).is_alphanumeric();
-                        if before_ok && after_ok {
-                            found = true;
-                            break;
-                        }
-                    }
-                    i += 1;
+        // Check for triple mustache {{{ }}} (raw, unescaped output)
+        if rest[start..].starts_with("{{{") {
+            let after_open = &rest[start + 3..];
+            if let Some(end) = after_open.find("}}}") {
+                let expr = after_open[..end].trim();
+                if check_reactive(expr) {
+                    // Keep reactive as double-mustache for signal runtime
+                    result.push_str(&format!("{{{{ {expr} }}}}"));
+                } else {
+                    let value = resolve_json_path(data, expr);
+                    result.push_str(&value);
                 }
-                found
-            });
-
-            if is_reactive {
-                result.push_str(&format!("{{{{ {expr} }}}}"));
+                rest = &after_open[end + 3..];
             } else {
-                let value = resolve_json_path(data, expr);
-                result.push_str(&value);
+                result.push_str("{{{");
+                rest = &rest[start + 3..];
             }
-            rest = &after_open[end + 2..];
         } else {
-            result.push_str("{{");
-            rest = after_open;
+            let after_open = &rest[start + 2..];
+            if let Some(end) = after_open.find("}}") {
+                let expr = after_open[..end].trim();
+                if check_reactive(expr) {
+                    result.push_str(&format!("{{{{ {expr} }}}}"));
+                } else {
+                    let value = resolve_json_path(data, expr);
+                    result.push_str(&escape_html(&value));
+                }
+                rest = &after_open[end + 2..];
+            } else {
+                result.push_str("{{");
+                rest = after_open;
+            }
         }
     }
     result.push_str(rest);

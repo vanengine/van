@@ -13,7 +13,7 @@ Provides the `van init` command implementation — interactive project creation 
 - Project directory structure (`pages/`, `components/`, `layouts/`)
 - `package.json` with Van configuration
 - Starter `.van` template files
-- Mock data (`mock/index.json`)
+- Page data (`data/index.json`)
 
 ```rust
 // Used internally by the van CLI

@@ -11,7 +11,7 @@ pub fn run() -> Result<()> {
         bail!("No pages found in src/pages/");
     }
 
-    let all_mock = project.load_all_mock_data();
+    let all_data = project.load_all_data();
 
     // Create dist/ directory
     let dist_dir = project.dist_dir();
@@ -31,13 +31,13 @@ pub fn run() -> Result<()> {
             .unwrap_or(entry);
 
         let page_key = format!("pages/{}", stem);
-        let mock_data = all_mock
+        let page_data = all_data
             .get(&page_key)
             .cloned()
             .unwrap_or(serde_json::json!({}));
-        let mock_json = serde_json::to_string(&mock_data)?;
+        let data_json = serde_json::to_string(&page_data)?;
 
-        let html = van_compiler::compile_page(entry, &files, &mock_json)
+        let html = van_compiler::compile_page(entry, &files, &data_json)
             .map_err(|e| anyhow::anyhow!("Failed to compile {}: {}", entry, e))?;
 
         // Write output: index.van -> dist/index.html, other.van -> dist/other/index.html

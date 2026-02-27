@@ -30,10 +30,7 @@
 ## 特性
 
 - **Vue SFC 语法** — 使用熟悉的 `<template>`、`<script setup>`、`<style scoped>` 编写模板
-- **无 Node.js 依赖** — 核心由 Rust 编写，编译为 WASM 供后端集成
-- **信号响应式** — 轻量客户端交互，直接 DOM 更新（~4KB 运行时，无虚拟 DOM）
-- **框架无关** — WASM 编译器通过 JSON stdin/stdout 协议与任何后端集成
-- **跨平台** — 预构建 WASM + 原生二进制（Linux x64/ARM64、macOS x64/ARM64、Windows x64）
+- **信号响应式** — 轻量客户端交互，直接 DOM 更新（~4KB 运行时）
 
 ## 安装
 
@@ -43,7 +40,7 @@
 curl -fsSL https://raw.githubusercontent.com/vanengine/van/main/install.sh | sh
 ```
 
-**手动下载**：从 [GitHub Releases](https://github.com/vanengine/van/releases) 下载最新的 `van-cli-*` 二进制文件，放入 `PATH` 目录。
+**手动下载**：从 [GitHub Releases](https://github.com/vanengine/van/releases) 下载最新的 `van-*` 二进制文件，放入 `PATH` 目录。
 
 ## 使用
 
@@ -55,11 +52,9 @@ van generate               # 静态站点生成
 
 ### 框架集成
 
-Van 通过 WASM 二进制将 `.van` 文件编译为 HTML，可集成到任何后端：
+Van 通过 WASM 二进制将 `.van` 文件编译为 HTML，可集成到多个后端：
 
 - **Spring Boot** — [van-spring-boot-starter](https://github.com/vanengine/van-spring-boot-starter)
-
-底层 JSON 协议详见下方 [WASM 集成](#从源码构建)。
 
 ## 示例
 
@@ -125,28 +120,6 @@ cargo build --target wasm32-wasip1 -p van-compiler-wasi --release
 # 运行测试
 cargo test
 ```
-
-</details>
-
-<details>
-<summary><strong>WASM 集成</strong></summary>
-
-WASM 编译器通过 stdin 接收 JSON，返回编译后的 HTML：
-
-```jsonc
-// 输入
-{ "entry_path": "pages/index.van", "files": { ... }, "mock_data_json": "..." }
-
-// 输出
-{ "ok": true, "html": "<h1>{{ title }}</h1>..." }
-```
-
-两种执行模式：
-
-- **单次执行**（默认）— 读取 stdin，编译一次，写入响应
-- **守护进程**（`--daemon`）— JSON Lines 协议，保持运行直到 stdin EOF
-
-宿主框架执行第二轮处理，将 `{{ expr }}` 替换为服务端模型数据。
 
 </details>
 

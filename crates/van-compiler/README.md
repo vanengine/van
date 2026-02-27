@@ -23,7 +23,7 @@ let mut files = HashMap::new();
 files.insert("pages/index.van".into(), template_source.into());
 files.insert("components/header.van".into(), header_source.into());
 
-let html = compile_page("pages/index.van", &files, &mock_data_json)?;
+let html = compile_page("pages/index.van", &files, &data_json)?;
 ```
 
 ## Compilation Pipeline
@@ -40,11 +40,11 @@ let html = compile_page("pages/index.van", &files, &mock_data_json)?;
 
 | Function | Description |
 |---|---|
-| `compile_page(entry, files, mock_json)` | Compile multi-file project → HTML string |
-| `compile_page_debug(entry, files, mock_json, origins)` | Same with debug comments at boundaries |
-| `compile_page_assets(entry, files, mock_json, prefix)` | Compile with separated CSS/JS assets |
+| `compile_page(entry, files, data_json)` | Compile multi-file project → HTML string |
+| `compile_page_debug(entry, files, data_json, origins)` | Same with debug comments at boundaries |
+| `compile_page_assets(entry, files, data_json, prefix)` | Compile with separated CSS/JS assets |
 | `compile_page_assets_debug(...)` | Same with debug comments |
-| `compile_single(source, mock_json)` | Compile a single `.van` string |
+| `compile_single(source, data_json)` | Compile a single `.van` string |
 
 All functions return `Result<T, String>` for WASM compatibility.
 
