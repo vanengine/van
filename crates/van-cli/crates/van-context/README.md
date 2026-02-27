@@ -1,5 +1,7 @@
 # van-context
 
+[![crates.io](https://img.shields.io/crates/v/van-context)](https://crates.io/crates/van-context)
+
 Project context and configuration reader for the Van template engine CLI.
 
 Part of the [Van](https://github.com/vanengine/van) template engine.

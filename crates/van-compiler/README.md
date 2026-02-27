@@ -1,5 +1,7 @@
 # van-compiler
 
+[![crates.io](https://img.shields.io/crates/v/van-compiler)](https://crates.io/crates/van-compiler)
+
 Server-side HTML compiler for the Van template engine — orchestrates parsing, import resolution, rendering, and client JS generation from `.van` files.
 
 Part of the [Van](https://github.com/vanengine/van) template engine.

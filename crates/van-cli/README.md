@@ -1,5 +1,7 @@
 # Van
 
+[![crates.io](https://img.shields.io/crates/v/van)](https://crates.io/crates/van)
+
 CLI toolchain for the [Van](https://github.com/vanengine/van) template engine — project scaffolding, dev server with hot reload, and static HTML generation.
 
 ## Install
