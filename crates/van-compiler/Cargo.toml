@@ -1,0 +1,21 @@
+[package]
+name = "van-compiler"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+van-parser = { path = "../van-parser" }
+van-signal-gen = { path = "../van-signal-gen" }
+serde_json = { workspace = true }
+regex = { workspace = true }
+wasm-bindgen = { workspace = true, optional = true }
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[features]
+default = []
+wasm = ["wasm-bindgen"]
