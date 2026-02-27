@@ -50,9 +50,16 @@ curl -fsSL https://raw.githubusercontent.com/vanengine/van/main/install.sh | sh
 ```bash
 van init my-project        # Scaffold a new Van project
 van dev                    # Start dev server with hot reload
-van build                  # Build for production
 van generate               # Static site generation
 ```
+
+### Framework Integration
+
+Van compiles `.van` files to HTML via a WASM binary — integrate with any backend:
+
+- **Spring Boot** — [van-spring-boot-starter](https://github.com/vanengine/van-spring-boot-starter)
+
+See [WASM Integration](#build-from-source) below for the raw JSON protocol.
 
 ## Example
 
@@ -94,7 +101,7 @@ Server-side `{{ title }}` is interpolated by the host framework; `count` becomes
 
 | Crate | Purpose |
 |---|---|
-| `van-cli` | CLI binary (`van init`, `van dev`, `van build`, `van generate`) |
+| `van-cli` | CLI binary (`van init`, `van dev`, `van generate`) |
 | `van-context` | Project context and configuration |
 | `van-dev` | Dev server with hot reload |
 | `van-init` | Project scaffolding |

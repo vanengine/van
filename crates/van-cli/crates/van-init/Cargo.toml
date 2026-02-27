@@ -2,6 +2,12 @@
 name = "van-init"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Project scaffolding for Van template engine"
+keywords = ["van", "init", "scaffolding"]
+categories = ["template-engine", "development-tools"]
 
 [dependencies]
 van-context = { workspace = true }

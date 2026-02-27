@@ -224,6 +224,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  publish-crates:
+    needs: [check-version, create-tag]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish to crates.io
+        run: |
+          cargo publish -p van-parser
+          cargo publish -p van-signal-gen
+          cargo publish -p van-compiler
+          cargo publish -p van-context
+          cargo publish -p van-init
+          cargo publish -p van-dev
+          cargo publish -p van-cli
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+
   dispatch-starter:
     needs: [check-version, release]
     runs-on: ubuntu-latest

@@ -2,9 +2,15 @@
 name = "van-compiler"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Server-side HTML compiler for Van template engine (.van files)"
+keywords = ["van", "template", "compiler", "html", "ssr"]
+categories = ["template-engine", "compilers"]
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [dependencies]
 van-parser = { workspace = true }

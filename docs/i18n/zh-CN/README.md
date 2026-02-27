@@ -50,9 +50,16 @@ curl -fsSL https://raw.githubusercontent.com/vanengine/van/main/install.sh | sh
 ```bash
 van init my-project        # 创建新的 Van 项目
 van dev                    # 启动开发服务器（热重载）
-van build                  # 生产构建
 van generate               # 静态站点生成
 ```
+
+### 框架集成
+
+Van 通过 WASM 二进制将 `.van` 文件编译为 HTML，可集成到任何后端：
+
+- **Spring Boot** — [van-spring-boot-starter](https://github.com/vanengine/van-spring-boot-starter)
+
+底层 JSON 协议详见下方 [WASM 集成](#从源码构建)。
 
 ## 示例
 
@@ -94,7 +101,7 @@ h1 { color: steelblue; }
 
 | Crate | 用途 |
 |---|---|
-| `van-cli` | CLI 二进制（`van init`、`van dev`、`van build`、`van generate`） |
+| `van-cli` | CLI 二进制（`van init`、`van dev`、`van generate`） |
 | `van-context` | 项目上下文与配置 |
 | `van-dev` | 开发服务器（热重载） |
 | `van-init` | 项目脚手架 |
