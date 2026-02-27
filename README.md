@@ -99,6 +99,7 @@ Server-side `{{ title }}` is interpolated by the host framework; `count` becomes
 | `van-dev` | Dev server with hot reload |
 | `van-init` | Project scaffolding |
 
+<a id="build-from-source"></a>
 <details>
 <summary><strong>Build from Source</strong></summary>
 
