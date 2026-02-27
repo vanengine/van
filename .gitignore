@@ -1,0 +1,20 @@
+# Build
+/target/
+*.wasm
+
+# Dependencies (library crates should not commit lock file)
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/
