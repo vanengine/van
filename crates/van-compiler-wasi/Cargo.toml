@@ -1,0 +1,9 @@
+[package]
+name = "van-compiler-wasi"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+van-compiler = { path = "../van-compiler" }
+serde = { workspace = true }
+serde_json = { workspace = true }
