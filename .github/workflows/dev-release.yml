@@ -212,14 +212,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  dispatch-starter:
+  dispatch-java:
     needs: [get-version, release]
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        repo:
+          - van-java/van-java-core
+          - van-java/van-spring-boot-starter
     steps:
-      - name: Dispatch to van-spring-boot-starter
+      - name: Dispatch to ${{ matrix.repo }}
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.VANENGINE_PAT }}
-          repository: vanengine/van-spring-boot-starter
+          repository: ${{ matrix.repo }}
           event-type: van-dev-published
           client-payload: '{"van_core_version": "${{ needs.get-version.outputs.version }}"}'

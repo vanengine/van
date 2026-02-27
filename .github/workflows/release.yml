@@ -242,14 +242,19 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
 
-  dispatch-starter:
+  dispatch-java:
     needs: [check-version, release]
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        repo:
+          - van-java/van-java-core
+          - van-java/van-spring-boot-starter
     steps:
-      - name: Dispatch to van-spring-boot-starter
+      - name: Dispatch to ${{ matrix.repo }}
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.VANENGINE_PAT }}
-          repository: vanengine/van-spring-boot-starter
+          repository: ${{ matrix.repo }}
           event-type: van-released
           client-payload: '{"van_core_version": "${{ needs.check-version.outputs.version }}"}'
