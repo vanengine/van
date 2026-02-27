@@ -44,9 +44,9 @@ pub async fn run(port: u16) -> Result<()> {
     let app = Router::new()
         .route("/__van/ws", get(ws_handler))
         .route("/__van/playground", get(playground_handler))
-        .route("/__van/playground/:file", get(playground_file_handler))
+        .route("/__van/playground/{file}", get(playground_file_handler))
         .route("/", get(index_handler))
-        .route("/:page", get(page_handler))
+        .route("/{page}", get(page_handler))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{port}");
