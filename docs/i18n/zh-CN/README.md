@@ -99,6 +99,7 @@ h1 { color: steelblue; }
 | `van-dev` | 开发服务器（热重载） |
 | `van-init` | 项目脚手架 |
 
+<a id="从源码构建"></a>
 <details>
 <summary><strong>从源码构建</strong></summary>
 
