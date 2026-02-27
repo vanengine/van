@@ -2,6 +2,12 @@
 name = "van-dev"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Dev server with hot reload for Van template engine"
+keywords = ["van", "dev-server", "hot-reload"]
+categories = ["template-engine", "development-tools"]
 
 [dependencies]
 van-parser = { workspace = true }

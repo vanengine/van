@@ -2,6 +2,7 @@
 name = "van-compiler-wasi"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [dependencies]
 van-compiler = { workspace = true }

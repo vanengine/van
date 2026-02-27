@@ -2,6 +2,16 @@
 name = "van-cli"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "CLI toolchain for Van template engine — init, dev server, generate"
+keywords = ["van", "cli", "template", "dev-server", "scaffolding"]
+categories = ["command-line-utilities", "template-engine"]
+
+[lib]
+name = "van_cli"
+path = "src/lib.rs"
 
 [[bin]]
 name = "van"

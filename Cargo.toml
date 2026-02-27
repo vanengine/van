@@ -1,7 +1,9 @@
 [workspace.package]
-version = "0.1.12"
+version = "0.1.13"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/vanengine/van"
+homepage = "https://github.com/vanengine/van"
 
 [workspace]
 resolver = "2"
@@ -14,17 +16,19 @@ members = [
     "crates/van-cli/crates/van-context",
     "crates/van-cli/crates/van-dev",
     "crates/van-cli/crates/van-init",
+    "crates/van-cli/crates/van",
 ]
 
 [workspace.dependencies]
 # Internal crates — core engine
-van-parser = { path = "crates/van-parser" }
-van-signal-gen = { path = "crates/van-signal-gen" }
-van-compiler = { path = "crates/van-compiler" }
+van-parser = { version = "0.1.13", path = "crates/van-parser" }
+van-signal-gen = { version = "0.1.13", path = "crates/van-signal-gen" }
+van-compiler = { version = "0.1.13", path = "crates/van-compiler" }
 # Internal crates — CLI
-van-context = { path = "crates/van-cli/crates/van-context" }
-van-dev = { path = "crates/van-cli/crates/van-dev" }
-van-init = { path = "crates/van-cli/crates/van-init" }
+van-cli = { version = "0.1.13", path = "crates/van-cli" }
+van-context = { version = "0.1.13", path = "crates/van-cli/crates/van-context" }
+van-dev = { version = "0.1.13", path = "crates/van-cli/crates/van-dev" }
+van-init = { version = "0.1.13", path = "crates/van-cli/crates/van-init" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
