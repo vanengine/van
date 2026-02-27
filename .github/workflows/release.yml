@@ -139,8 +139,65 @@ jobs:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}
 
+  build-cli:
+    needs: [check-version, create-tag]
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: van-cli-linux-x64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: van-cli-linux-arm64
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact: van-cli-darwin-x64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact: van-cli-darwin-arm64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact: van-cli-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} -p van-cli
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/van dist/${{ matrix.artifact }}
+          strip dist/${{ matrix.artifact }} || true
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir dist
+          copy target\${{ matrix.target }}\release\van.exe dist\${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+
   release:
-    needs: [check-version, build-wasm, build-native]
+    needs: [check-version, build-wasm, build-native, build-cli]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -159,6 +216,11 @@ jobs:
             artifacts/van-compiler-darwin-x64/*
             artifacts/van-compiler-darwin-arm64/*
             artifacts/van-compiler-windows-x64.exe/*
+            artifacts/van-cli-linux-x64/*
+            artifacts/van-cli-linux-arm64/*
+            artifacts/van-cli-darwin-x64/*
+            artifacts/van-cli-darwin-arm64/*
+            artifacts/van-cli-windows-x64.exe/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -171,5 +233,5 @@ jobs:
         with:
           token: ${{ secrets.VANENGINE_PAT }}
           repository: vanengine/van-spring-boot-starter
-          event-type: van-core-released
+          event-type: van-released
           client-payload: '{"van_core_version": "${{ needs.check-version.outputs.version }}"}'

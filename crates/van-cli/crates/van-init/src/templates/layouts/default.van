@@ -1,0 +1,47 @@
+<template>
+  <html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><slot name="title">Van App</slot></title>
+  </head>
+  <body>
+    <nav class="navbar">
+      <a href="/">Home</a>
+    </nav>
+    <main class="container">
+      <slot />
+    </main>
+    <footer class="footer">
+      <p>Powered by Van</p>
+    </footer>
+  </body>
+  </html>
+</template>
+
+<style scoped>
+.navbar {
+  padding: 16px;
+  background: #f5f5f5;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.navbar a {
+  color: #333;
+  text-decoration: none;
+  font-weight: bold;
+}
+
+.container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.footer {
+  padding: 16px;
+  text-align: center;
+  color: #999;
+  font-size: 14px;
+}
+</style>

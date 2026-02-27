@@ -14,10 +14,11 @@
 
 <p align="center">
   <a href="#特性">特性</a> ·
+  <a href="#安装">安装</a> ·
+  <a href="#使用">使用</a> ·
   <a href="#示例">示例</a> ·
   <a href="#架构">架构</a> ·
-  <a href="#从源码构建">构建</a> ·
-  <a href="#wasm-集成">WASM 集成</a>
+  <a href="#从源码构建">构建</a>
 </p>
 
 <p align="center">
@@ -33,6 +34,25 @@
 - **信号响应式** — 轻量客户端交互，直接 DOM 更新（~4KB 运行时，无虚拟 DOM）
 - **框架无关** — WASM 编译器通过 JSON stdin/stdout 协议与任何后端集成
 - **跨平台** — 预构建 WASM + 原生二进制（Linux x64/ARM64、macOS x64/ARM64、Windows x64）
+
+## 安装
+
+**一键安装**（Linux / macOS）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vanengine/van/main/install.sh | sh
+```
+
+**手动下载**：从 [GitHub Releases](https://github.com/vanengine/van/releases) 下载最新的 `van-cli-*` 二进制文件，放入 `PATH` 目录。
+
+## 使用
+
+```bash
+van init my-project        # 创建新的 Van 项目
+van dev                    # 启动开发服务器（热重载）
+van build                  # 生产构建
+van generate               # 静态站点生成
+```
 
 ## 示例
 
@@ -61,6 +81,8 @@ h1 { color: steelblue; }
                               └── [van-signal-gen] → 信号响应式 JS（直接 DOM 操作）
 ```
 
+**核心引擎**（`crates/`）
+
 | Crate | 用途 |
 |---|---|
 | `van-parser` | 手写递归下降解析器，解析 `.van` 文件 |
@@ -68,15 +90,26 @@ h1 { color: steelblue; }
 | `van-compiler-wasi` | WASM 入口（JSON stdin/stdout 协议） |
 | `van-signal-gen` | `<script setup>` → 信号响应式直接 DOM JS |
 
-> **注意：** CLI 工具链（`van init`、`van dev`、`van build`、`van generate`）位于 [van-cli](https://github.com/vanengine/van-cli) 仓库。
+**CLI 工具链**（`crates/van-cli/`）
 
-## 从源码构建
+| Crate | 用途 |
+|---|---|
+| `van-cli` | CLI 二进制（`van init`、`van dev`、`van build`、`van generate`） |
+| `van-context` | 项目上下文与配置 |
+| `van-dev` | 开发服务器（热重载） |
+| `van-init` | 项目脚手架 |
+
+<details>
+<summary><strong>从源码构建</strong></summary>
 
 前置条件：[Rust 工具链](https://rustup.rs/)（1.70+）
 
 ```bash
 # 构建所有 crate
 cargo build --release
+
+# 构建 CLI 二进制
+cargo build --release -p van-cli
 
 # 构建 WASM 二进制（用于框架集成）
 cargo build --target wasm32-wasip1 -p van-compiler-wasi --release
@@ -85,7 +118,10 @@ cargo build --target wasm32-wasip1 -p van-compiler-wasi --release
 cargo test
 ```
 
-## WASM 集成
+</details>
+
+<details>
+<summary><strong>WASM 集成</strong></summary>
 
 WASM 编译器通过 stdin 接收 JSON，返回编译后的 HTML：
 
@@ -104,9 +140,10 @@ WASM 编译器通过 stdin 接收 JSON，返回编译后的 HTML：
 
 宿主框架执行第二轮处理，将 `{{ expr }}` 替换为服务端模型数据。
 
+</details>
+
 ## 相关项目
 
-- [**Van CLI**](https://github.com/vanengine/van-cli) — 命令行工具链（脚手架、开发服务器、构建、静态生成）
 - [**van-spring-boot-starter**](https://github.com/vanengine/van-spring-boot-starter) — Spring Boot 集成
 
 ## 许可证

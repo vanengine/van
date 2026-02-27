@@ -1,0 +1,46 @@
+<template>
+  <default-layout>
+    <template #title>{{ title }}</template>
+    <h1>Welcome to {{ title }}</h1>
+    <hello :name="title" />
+    <div class="counter">
+      <p>Count: {{ count }}</p>
+      <button @click="increment">+1</button>
+      <button @click="decrement">-1</button>
+    </div>
+  </default-layout>
+</template>
+
+<script setup lang="ts">
+import DefaultLayout from '../layouts/default.van'
+import Hello from '../components/hello.van'
+
+defineProps({ title: String })
+
+const count = ref(0)
+function increment() { count.value++ }
+function decrement() { count.value-- }
+</script>
+
+<style scoped>
+h1 {
+  color: #333;
+  margin-bottom: 24px;
+}
+.counter {
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  text-align: center;
+}
+.counter p {
+  font-size: 24px;
+  margin: 0 0 12px;
+}
+.counter button {
+  padding: 8px 16px;
+  margin: 0 4px;
+  cursor: pointer;
+}
+</style>
