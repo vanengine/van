@@ -1,5 +1,7 @@
 # van-dev
 
+[![crates.io](https://img.shields.io/crates/v/van-dev)](https://crates.io/crates/van-dev)
+
 Development server with hot reload for the Van template engine.
 
 Part of the [Van](https://github.com/vanengine/van) template engine.

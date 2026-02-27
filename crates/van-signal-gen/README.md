@@ -1,5 +1,7 @@
 # van-signal-gen
 
+[![crates.io](https://img.shields.io/crates/v/van-signal-gen)](https://crates.io/crates/van-signal-gen)
+
 Compiles `<script setup>` reactive code into signal-based JavaScript that performs direct DOM operations — no virtual DOM, no framework runtime (~4KB).
 
 Part of the [Van](https://github.com/vanengine/van) template engine.
