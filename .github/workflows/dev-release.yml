@@ -1,8 +1,8 @@
-name: Release
+name: Dev Release
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
     paths:
       - 'Cargo.toml'
       - 'crates/**'
@@ -11,55 +11,27 @@ permissions:
   contents: write
 
 concurrency:
-  group: release
+  group: dev-release
   cancel-in-progress: true
 
 jobs:
-  check-version:
+  get-version:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.current.outputs.version }}
-      changed: ${{ steps.check.outputs.changed }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
 
-      - name: Get current version
-        id: current
+      - name: Get base version from Cargo.toml
+        id: version
         run: |
-          VERSION=$(grep -A2 '\[workspace.package\]' Cargo.toml | grep 'version' | sed 's/.*"\(.*\)".*/\1/')
+          BASE=$(grep -A2 '\[workspace.package\]' Cargo.toml | grep 'version' | sed 's/.*"\(.*\)".*/\1/')
+          VERSION="${BASE}-dev.${{ github.run_number }}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Check if version changed
-        id: check
-        run: |
-          OLD_VERSION=$(git show HEAD~1:Cargo.toml 2>/dev/null | grep -A2 '\[workspace.package\]' | grep 'version' | sed 's/.*"\(.*\)".*/\1/' || echo "")
-          NEW_VERSION=${{ steps.current.outputs.version }}
-          if [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Version changed: $OLD_VERSION → $NEW_VERSION"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "Version unchanged: $NEW_VERSION"
-          fi
-
-  create-tag:
-    needs: check-version
-    if: needs.check-version.outputs.changed == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Create and push tag
-        run: |
-          VERSION=${{ needs.check-version.outputs.version }}
-          git tag "v${VERSION}"
-          git push origin "v${VERSION}"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "Dev release version: $VERSION"
 
   build-wasm:
-    needs: [check-version, create-tag]
+    needs: get-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,7 +44,7 @@ jobs:
 
       - name: Package
         run: |
-          VERSION=${{ needs.check-version.outputs.version }}
+          VERSION=${{ needs.get-version.outputs.version }}
           mkdir -p dist
           cp target/wasm32-wasip1/release/van-compiler-wasi.wasm dist/van-compiler.wasm
           cd dist && tar czf van-compiler-${VERSION}.wasm.tar.gz van-compiler.wasm
@@ -83,7 +55,7 @@ jobs:
           path: dist/*.tar.gz
 
   build-native:
-    needs: [check-version, create-tag]
+    needs: get-version
     strategy:
       matrix:
         include:
@@ -140,18 +112,34 @@ jobs:
           path: dist/${{ matrix.artifact }}
 
   release:
-    needs: [check-version, build-wasm, build-native]
+    needs: [get-version, build-wasm, build-native]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Create GitHub Release
+      - name: Delete existing pre-release tag (if any)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = 'v${{ needs.get-version.outputs.version }}';
+            try {
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `tags/${tag}`,
+              });
+            } catch (e) {
+              // Tag doesn't exist yet — that's fine
+            }
+
+      - name: Create GitHub Pre-Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.check-version.outputs.version }}
-          name: v${{ needs.check-version.outputs.version }}
+          tag_name: v${{ needs.get-version.outputs.version }}
+          name: v${{ needs.get-version.outputs.version }}
+          prerelease: true
           files: |
             artifacts/wasm-binary/*
             artifacts/van-compiler-linux-x64/*
@@ -163,7 +151,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   dispatch-starter:
-    needs: [check-version, release]
+    needs: [get-version, release]
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch to van-spring-boot-starter
@@ -171,5 +159,5 @@ jobs:
         with:
           token: ${{ secrets.VANENGINE_PAT }}
           repository: vanengine/van-spring-boot-starter
-          event-type: van-core-released
-          client-payload: '{"van_core_version": "${{ needs.check-version.outputs.version }}"}'
+          event-type: van-core-dev-published
+          client-payload: '{"van_core_version": "${{ needs.get-version.outputs.version }}"}'
