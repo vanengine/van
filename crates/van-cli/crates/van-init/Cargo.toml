@@ -1,0 +1,10 @@
+[package]
+name = "van-init"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+van-context = { workspace = true }
+anyhow = { workspace = true }
+dialoguer = { workspace = true }
+console = { workspace = true }

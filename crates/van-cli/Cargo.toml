@@ -1,0 +1,19 @@
+[package]
+name = "van-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "van"
+path = "src/main.rs"
+
+[dependencies]
+van-context = { workspace = true }
+van-dev = { workspace = true }
+van-init = { workspace = true }
+van-compiler = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true }

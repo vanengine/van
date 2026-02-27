@@ -14,10 +14,11 @@
 
 <p align="center">
   <a href="#features">Features</a> ·
+  <a href="#installation">Installation</a> ·
+  <a href="#usage">Usage</a> ·
   <a href="#example">Example</a> ·
   <a href="#architecture">Architecture</a> ·
-  <a href="#build-from-source">Build</a> ·
-  <a href="#wasm-integration">WASM Integration</a>
+  <a href="#build-from-source">Build</a>
 </p>
 
 <p align="center">
@@ -33,6 +34,25 @@
 - **Signal-based Reactivity** — Lightweight client-side interactivity with direct DOM updates (~4KB runtime, no virtual DOM)
 - **Framework-agnostic** — WASM compiler integrates with any backend via JSON stdin/stdout protocol
 - **Cross-platform** — Pre-built WASM + native binaries for Linux x64/ARM64, macOS x64/ARM64, and Windows x64
+
+## Installation
+
+**One-line install** (Linux / macOS):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vanengine/van/main/install.sh | sh
+```
+
+**Manual download**: grab the latest `van-cli-*` binary from [GitHub Releases](https://github.com/vanengine/van/releases) and place it in your `PATH`.
+
+## Usage
+
+```bash
+van init my-project        # Scaffold a new Van project
+van dev                    # Start dev server with hot reload
+van build                  # Build for production
+van generate               # Static site generation
+```
 
 ## Example
 
@@ -61,6 +81,8 @@ Server-side `{{ title }}` is interpolated by the host framework; `count` becomes
                               └── [van-signal-gen] → Signal-based JS (direct DOM ops)
 ```
 
+**Core Engine** (`crates/`)
+
 | Crate | Purpose |
 |---|---|
 | `van-parser` | Hand-written recursive descent parser for `.van` files |
@@ -68,15 +90,26 @@ Server-side `{{ title }}` is interpolated by the host framework; `count` becomes
 | `van-compiler-wasi` | WASM entry point (JSON stdin/stdout protocol) |
 | `van-signal-gen` | `<script setup>` → signal-based direct DOM JS |
 
-> **Note:** The CLI toolchain (`van init`, `van dev`, `van build`, `van generate`) lives in the [van-cli](https://github.com/vanengine/van-cli) repository.
+**CLI Toolchain** (`crates/van-cli/`)
 
-## Build from Source
+| Crate | Purpose |
+|---|---|
+| `van-cli` | CLI binary (`van init`, `van dev`, `van build`, `van generate`) |
+| `van-context` | Project context and configuration |
+| `van-dev` | Dev server with hot reload |
+| `van-init` | Project scaffolding |
+
+<details>
+<summary><strong>Build from Source</strong></summary>
 
 Prerequisites: [Rust toolchain](https://rustup.rs/) (1.70+)
 
 ```bash
 # Build all crates
 cargo build --release
+
+# Build CLI binary
+cargo build --release -p van-cli
 
 # Build WASM binary (for framework integration)
 cargo build --target wasm32-wasip1 -p van-compiler-wasi --release
@@ -85,7 +118,10 @@ cargo build --target wasm32-wasip1 -p van-compiler-wasi --release
 cargo test
 ```
 
-## WASM Integration
+</details>
+
+<details>
+<summary><strong>WASM Integration</strong></summary>
 
 The WASM compiler receives JSON via stdin and returns compiled HTML:
 
@@ -104,9 +140,10 @@ Two execution modes:
 
 Host frameworks perform a second pass to interpolate `{{ expr }}` with server-side model data.
 
+</details>
+
 ## Related
 
-- [**Van CLI**](https://github.com/vanengine/van-cli) — Command-line toolchain (scaffolding, dev server, build, static generation)
 - [**van-spring-boot-starter**](https://github.com/vanengine/van-spring-boot-starter) — Spring Boot integration
 
 ## License
