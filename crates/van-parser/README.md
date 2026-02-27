@@ -1,5 +1,7 @@
 # van-parser
 
+[![crates.io](https://img.shields.io/crates/v/van-parser)](https://crates.io/crates/van-parser)
+
 Recursive descent parser for `.van` files (Vue SFC syntax) — parses `<template>`, `<script setup>`, `<style scoped>` blocks into a `VanBlock` struct.
 
 Part of the [Van](https://github.com/vanengine/van) template engine.

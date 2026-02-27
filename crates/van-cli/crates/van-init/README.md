@@ -1,5 +1,7 @@
 # van-init
 
+[![crates.io](https://img.shields.io/crates/v/van-init)](https://crates.io/crates/van-init)
+
 Project scaffolding for the Van template engine.
 
 Part of the [Van](https://github.com/vanengine/van) template engine.
