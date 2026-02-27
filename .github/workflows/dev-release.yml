@@ -212,19 +212,51 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  dispatch-java:
+  dispatch-core:
     needs: [get-version, release]
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        repo:
-          - van-java/van-java-core
-          - van-java/van-spring-boot-starter
     steps:
-      - name: Dispatch to ${{ matrix.repo }}
+      - name: Dispatch to van-java-core
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.VANENGINE_PAT }}
-          repository: ${{ matrix.repo }}
+          repository: van-java/van-java-core
+          event-type: van-dev-published
+          client-payload: '{"van_core_version": "${{ needs.get-version.outputs.version }}"}'
+
+      - name: Wait for van-java-core publish
+        run: |
+          echo "Waiting for van-java-core to publish..."
+          for i in $(seq 1 30); do
+            RUN_ID=$(gh run list --repo van-java/van-java-core --event repository_dispatch --limit 1 --json databaseId,status --jq '.[0]')
+            STATUS=$(echo "$RUN_ID" | jq -r '.status')
+            ID=$(echo "$RUN_ID" | jq -r '.databaseId')
+            if [ "$STATUS" = "completed" ]; then
+              CONCLUSION=$(gh run view "$ID" --repo van-java/van-java-core --json conclusion --jq '.conclusion')
+              if [ "$CONCLUSION" = "success" ]; then
+                echo "van-java-core published successfully"
+                exit 0
+              else
+                echo "van-java-core failed with conclusion: $CONCLUSION"
+                exit 1
+              fi
+            fi
+            echo "Attempt $i/30: status=$STATUS, waiting 30s..."
+            sleep 30
+          done
+          echo "Timed out waiting for van-java-core"
+          exit 1
+        env:
+          GH_TOKEN: ${{ secrets.VANENGINE_PAT }}
+
+  dispatch-starter:
+    needs: [get-version, dispatch-core]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch to van-spring-boot-starter
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.VANENGINE_PAT }}
+          repository: van-java/van-spring-boot-starter
           event-type: van-dev-published
           client-payload: '{"van_core_version": "${{ needs.get-version.outputs.version }}"}'
