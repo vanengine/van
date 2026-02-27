@@ -12,11 +12,12 @@ A language-agnostic template rendering engine that uses Vue SFC syntax (`.van` f
 # Build all Rust crates
 cargo build --release
 
+# Build CLI binary
+cargo build --release -p van-cli
+
 # Build WASM binary (for framework integration)
 cargo build --target wasm32-wasip1 -p van-compiler-wasi --release
 ```
-
-> **Note:** The CLI toolchain (`van-cli`, `van-core`, `van-dev-server`, `van-registry`) has been moved to the [van-cli](https://github.com/vanengine/van-cli) repository. Use that repo for `van init`, `van dev`, `van build`, `van generate`, `van install` commands.
 
 ## Testing
 
@@ -34,7 +35,9 @@ No custom rustfmt, clippy, or toolchain configuration — use defaults.
 
 ## Project Structure
 
-Cargo workspace with 4 crates (version managed at workspace level in root `Cargo.toml`):
+Cargo workspace with 8 crates (version managed at workspace level in root `Cargo.toml`):
+
+**Core Engine** (`crates/`):
 
 | Crate | Purpose |
 |---|---|
@@ -42,6 +45,15 @@ Cargo workspace with 4 crates (version managed at workspace level in root `Cargo
 | `van-compiler` | Orchestrates server HTML + client JS compilation |
 | `van-compiler-wasi` | WASM entry point (JSON stdin/stdout protocol) |
 | `van-signal-gen` | Compiles `<script setup>` → signal-based direct DOM JS (~4KB runtime) |
+
+**CLI Toolchain** (`crates/van-cli/`):
+
+| Crate | Purpose |
+|---|---|
+| `van-cli` | CLI binary (`van init`, `van dev`, `van build`, `van generate`) |
+| `van-context` | Project context and configuration |
+| `van-dev` | Dev server with hot reload |
+| `van-init` | Project scaffolding |
 
 ## Compilation Pipeline
 
@@ -60,6 +72,7 @@ Additional entry points: `compile_single()` for single-file compilation without 
 ## Error Handling Patterns
 
 - **Library/WASM crates** (`van-parser`, `van-compiler`, `van-signal-gen`): use `Result<T, String>` or `Option<T>` — zero external error dependencies to keep WASM-compatible
+- **CLI crates** (`van-cli`, `van-context`, `van-dev`, `van-init`): use `anyhow::Result` for ergonomic error handling
 
 ## Key Types (van-parser)
 
@@ -70,7 +83,11 @@ Additional entry points: `compile_single()` for single-file compilation without 
 
 ## WASM Integration
 
-The WASM compiler (`van-compiler-wasi`) receives JSON via stdin: `{ entry_path, files, mock_data_json, asset_prefix, debug, file_origins }` and returns compiled HTML + assets. When `asset_prefix` is provided, CSS/JS are emitted as separate assets. Host frameworks perform a second pass to interpolate `{{ expr }}` with server-side model data.
+The WASM compiler (`van-compiler-wasi`) receives JSON via stdin: `{ entry_path, files, mock_data_json, asset_prefix, debug, file_origins }` and returns `{ ok, html?, assets?, error? }`. When `asset_prefix` is provided, CSS/JS are emitted as separate assets. Host frameworks perform a second pass to interpolate `{{ expr }}` with server-side model data.
+
+Two execution modes:
+- **Single-shot** (default): reads all stdin, compiles once, writes response
+- **Daemon** (`--daemon` flag): reads one JSON object per line (JSON Lines), compiles each, writes response per line — stays alive until stdin EOF
 
 ## Key Conventions
 
@@ -79,14 +96,9 @@ The WASM compiler (`van-compiler-wasi`) receives JSON via stdin: `{ entry_path, 
 - Mock data lives in `mock/index.json`, keyed by page path (e.g., `"pages/index"`)
 - Theme inheritance via `theme.json` in `van.themes/` directory
 
-## Authoritative Specification
-
-`/spec/v0.1.md` is the comprehensive language specification. Consult it for template syntax, directives, component system, rendering model, and architecture decisions.
-
 ## CI/CD
 
-`.github/workflows/release.yml` — triggers on push to `main` when `Cargo.toml` or `crates/**` change. Jobs: version check → create git tag → build WASM binary → GitHub Release.
+Two workflows, both triggered by pushes to `Cargo.toml` or `crates/**`:
 
-## Environment Variables
-
-- `VAN_REGISTRY` — Override the default npm registry URL for package installation (falls back to `config.registry` in `package.json`, then `https://registry.npmjs.org`)
+- `.github/workflows/release.yml` — pushes to `main`: version check → create git tag → build WASM + native binaries + CLI binaries (linux x64/arm64, macOS x64/arm64, Windows x64) → GitHub Release → dispatch to `van-spring-boot-starter`
+- `.github/workflows/dev-release.yml` — pushes to `dev`: build WASM + native binaries + CLI binaries → GitHub pre-release (version: `{base}-dev.{run_number}`) → dispatch to `van-spring-boot-starter`

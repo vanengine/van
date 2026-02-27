@@ -1,0 +1,16 @@
+[package]
+name = "van-dev"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+van-parser = { workspace = true }
+van-compiler = { workspace = true }
+van-context = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+notify = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }

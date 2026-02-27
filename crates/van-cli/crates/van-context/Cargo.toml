@@ -1,9 +1,9 @@
 [package]
-name = "van-compiler-wasi"
+name = "van-context"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-van-compiler = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+anyhow = { workspace = true }

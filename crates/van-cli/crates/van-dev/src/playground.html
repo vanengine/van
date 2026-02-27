@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Van Playground</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #1e1e2e; --surface: #181825; --overlay: #313244;
+  --text: #cdd6f4; --subtext: #a6adc8; --accent: #89b4fa;
+  --red: #f38ba8; --green: #a6e3a1; --border: #45475a;
+  --header-h: 44px; --error-h: 0px;
+}
+body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+/* Header */
+.header { height: var(--header-h); background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 16px; gap: 12px; flex-shrink: 0; }
+.header h1 { font-size: 14px; font-weight: 600; color: var(--accent); }
+.status { font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+.status.loading { background: #fab38733; color: #fab387; }
+.status.ready { background: #a6e3a133; color: var(--green); }
+.status.error { background: #f38ba833; color: var(--red); }
+
+/* Main area */
+.main { flex: 1; display: flex; overflow: hidden; }
+
+/* Editor panel */
+.editor-panel { width: 50%; display: flex; flex-direction: column; min-width: 200px; }
+.tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; overflow-x: auto; align-items: stretch; }
+.tab { padding: 8px 12px; font-size: 12px; color: var(--subtext); cursor: pointer; border-bottom: 2px solid transparent; background: none; border-top: none; border-left: none; border-right: none; font-family: inherit; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab:hover { color: var(--text); }
+.tab .close { font-size: 10px; opacity: 0.5; padding: 2px 4px; border-radius: 3px; line-height: 1; }
+.tab .close:hover { opacity: 1; background: var(--overlay); }
+.tab-add { padding: 8px 12px; font-size: 14px; color: var(--subtext); cursor: pointer; background: none; border: none; font-family: inherit; }
+.tab-add:hover { color: var(--accent); }
+.tab-sep { flex: 1; }
+.tab-mock { margin-left: auto; }
+.editor-wrap { flex: 1; position: relative; }
+.editor { width: 100%; height: 100%; background: var(--bg); color: var(--text); border: none; outline: none; resize: none; padding: 12px 16px; font-family: inherit; font-size: 13px; line-height: 1.6; tab-size: 2; }
+
+/* Splitter */
+.splitter { width: 4px; background: var(--border); cursor: col-resize; flex-shrink: 0; transition: background 0.15s; }
+.splitter:hover, .splitter.dragging { background: var(--accent); }
+
+/* Preview panel */
+.preview-panel { flex: 1; display: flex; flex-direction: column; min-width: 200px; }
+.preview-header { height: 33px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 16px; font-size: 12px; color: var(--subtext); flex-shrink: 0; }
+.preview-frame { flex: 1; border: none; background: #fff; }
+
+/* Error bar */
+.error-bar { background: #1e1016; border-top: 1px solid #f38ba855; color: var(--red); font-size: 12px; padding: 8px 16px; display: none; flex-shrink: 0; max-height: 120px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+.error-bar.visible { display: block; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Van Playground</h1>
+  <span id="status" class="status loading">Loading WASM...</span>
+</div>
+
+<div class="main">
+  <div class="editor-panel" id="editorPanel">
+    <div class="tabs" id="tabBar"></div>
+    <div class="editor-wrap">
+      <textarea id="editor" class="editor" spellcheck="false"></textarea>
+    </div>
+  </div>
+
+  <div class="splitter" id="splitter"></div>
+
+  <div class="preview-panel">
+    <div class="preview-header">Preview</div>
+    <iframe id="preview" class="preview-frame" sandbox="allow-scripts"></iframe>
+  </div>
+</div>
+
+<div id="errorBar" class="error-bar"></div>
+
+<script type="module">
+// ── Default demo files ──
+const DEFAULT_FILES = {
+  'index.van': `<template>
+  <div class="app">
+    <hello :name="title" />
+    <div class="counter">
+      <p>Count: {{ count }}</p>
+      <button @click="increment">+1</button>
+      <button @click="decrement">-1</button>
+    </div>
+    <p v-show="count">Count is not zero!</p>
+    <button @click="toggleDrawer">Toggle Drawer</button>
+    <Transition name="slide">
+      <div class="drawer" v-show="drawerOpen">Drawer Content</div>
+    </Transition>
+  </div>
+</template>
+
+<script setup>
+import Hello from './hello.van'
+const count = ref(0)
+const drawerOpen = ref(false)
+function increment() { count.value++ }
+function decrement() { count.value-- }
+function toggleDrawer() { drawerOpen.value = !drawerOpen.value }
+<\/script>
+
+<style>
+.app { max-width: 480px; margin: 40px auto; font-family: sans-serif; }
+.counter { display: flex; align-items: center; gap: 12px; margin: 20px 0; }
+button { padding: 6px 16px; border: 1px solid #ddd; border-radius: 4px; background: #fff; cursor: pointer; font-size: 14px; margin: 4px 0; }
+button:hover { background: #f0f0f0; }
+p { color: #666; }
+.drawer { background: #f0f7ff; border: 1px solid #89b4fa; border-radius: 8px; padding: 16px; margin-top: 12px; overflow: hidden; }
+.slide-enter-active, .slide-leave-active { transition: transform .3s ease, opacity .3s ease; }
+.slide-enter-from, .slide-leave-to { transform: translateY(-10px); opacity: 0; }
+</style>`,
+
+  'hello.van': `<template>
+  <h1>Hello, {{ name }}!</h1>
+</template>
+
+<style>
+h1 { color: #2c3e50; margin-bottom: 8px; }
+</style>`
+};
+
+const DEFAULT_MOCK = `{
+  "title": "Van Playground"
+}`;
+
+// ── State ──
+// Map<filename, content> — insertion order preserved, first file = entry
+const files = new Map();
+let activeFile = null;   // currently displayed file tab
+let showMock = false;    // whether Mock Data tab is active
+let mockContent = '';
+
+// ── Elements ──
+const editorEl = document.getElementById('editor');
+const preview = document.getElementById('preview');
+const statusEl = document.getElementById('status');
+const errorBar = document.getElementById('errorBar');
+const editorPanel = document.getElementById('editorPanel');
+const splitter = document.getElementById('splitter');
+const tabBar = document.getElementById('tabBar');
+
+// ── Load saved state or defaults ──
+function loadState() {
+  try {
+    const savedFiles = localStorage.getItem('van-pg-files');
+    if (savedFiles) {
+      const obj = JSON.parse(savedFiles);
+      for (const [k, v] of Object.entries(obj)) files.set(k, v);
+    }
+  } catch {}
+  if (files.size === 0) {
+    for (const [k, v] of Object.entries(DEFAULT_FILES)) files.set(k, v);
+  }
+  mockContent = localStorage.getItem('van-pg-mock') || DEFAULT_MOCK;
+  activeFile = files.keys().next().value;
+}
+loadState();
+
+// ── Tab rendering ──
+function renderTabs() {
+  tabBar.innerHTML = '';
+
+  for (const name of files.keys()) {
+    const tab = document.createElement('button');
+    tab.className = 'tab' + (name === activeFile && !showMock ? ' active' : '');
+    tab.dataset.file = name;
+
+    const label = document.createElement('span');
+    label.textContent = name;
+    tab.appendChild(label);
+
+    // Close button (only if more than 1 file)
+    if (files.size > 1) {
+      const close = document.createElement('span');
+      close.className = 'close';
+      close.textContent = '\u00d7';
+      close.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteFile(name);
+      });
+      tab.appendChild(close);
+    }
+
+    tab.addEventListener('click', () => switchToFile(name));
+    tabBar.appendChild(tab);
+  }
+
+  // + button
+  const addBtn = document.createElement('button');
+  addBtn.className = 'tab-add';
+  addBtn.textContent = '+';
+  addBtn.title = 'Add file';
+  addBtn.addEventListener('click', addFile);
+  tabBar.appendChild(addBtn);
+
+  // Spacer
+  const sep = document.createElement('span');
+  sep.className = 'tab-sep';
+  tabBar.appendChild(sep);
+
+  // Mock Data tab
+  const mockTab = document.createElement('button');
+  mockTab.className = 'tab tab-mock' + (showMock ? ' active' : '');
+  mockTab.textContent = 'Mock Data';
+  mockTab.addEventListener('click', () => {
+    saveCurrentContent();
+    showMock = true;
+    activeFile = null;
+    editorEl.value = mockContent;
+    renderTabs();
+  });
+  tabBar.appendChild(mockTab);
+}
+
+function switchToFile(name) {
+  saveCurrentContent();
+  showMock = false;
+  activeFile = name;
+  editorEl.value = files.get(name) || '';
+  renderTabs();
+}
+
+function saveCurrentContent() {
+  if (showMock) {
+    mockContent = editorEl.value;
+  } else if (activeFile && files.has(activeFile)) {
+    files.set(activeFile, editorEl.value);
+  }
+}
+
+function addFile() {
+  let name = prompt('File name (e.g. button.van):');
+  if (!name) return;
+  name = name.trim();
+  if (!name) return;
+  if (!name.endsWith('.van')) name += '.van';
+  if (files.has(name)) {
+    switchToFile(name);
+    return;
+  }
+  files.set(name, `<template>\n  <div>${name.replace('.van', '')}</div>\n</template>\n`);
+  switchToFile(name);
+  scheduleCompile();
+}
+
+function deleteFile(name) {
+  if (files.size <= 1) return;
+  files.delete(name);
+  if (activeFile === name) {
+    activeFile = files.keys().next().value;
+    showMock = false;
+    editorEl.value = files.get(activeFile) || '';
+  }
+  renderTabs();
+  scheduleCompile();
+}
+
+// Initialize editor
+editorEl.value = files.get(activeFile) || '';
+renderTabs();
+
+// ── Tab key inserts 2 spaces ──
+editorEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const start = editorEl.selectionStart;
+    const end = editorEl.selectionEnd;
+    editorEl.value = editorEl.value.substring(0, start) + '  ' + editorEl.value.substring(end);
+    editorEl.selectionStart = editorEl.selectionEnd = start + 2;
+    scheduleCompile();
+  }
+});
+
+// ── WASM loading ──
+let compileVan = null;
+
+async function loadWasm() {
+  try {
+    const mod = await import('/__van/playground/van_compiler.js');
+    await mod.default('/__van/playground/van_compiler_bg.wasm');
+    compileVan = mod.compile_van;
+    statusEl.textContent = 'Ready';
+    statusEl.className = 'status ready';
+    doCompile();
+  } catch (err) {
+    statusEl.textContent = 'WASM Error';
+    statusEl.className = 'status error';
+    showError('Failed to load WASM: ' + err.message);
+  }
+}
+
+// ── Compile & preview ──
+let compileTimer = null;
+function scheduleCompile() {
+  clearTimeout(compileTimer);
+  compileTimer = setTimeout(doCompile, 300);
+}
+
+function doCompile() {
+  if (!compileVan) return;
+
+  saveCurrentContent();
+
+  // Build files object from Map
+  const filesObj = {};
+  for (const [name, content] of files) filesObj[name] = content;
+  const entryFile = files.keys().next().value;
+
+  // Save to localStorage
+  localStorage.setItem('van-pg-files', JSON.stringify(filesObj));
+  localStorage.setItem('van-pg-mock', mockContent);
+
+  try {
+    const html = compileVan(entryFile, JSON.stringify(filesObj), mockContent);
+    preview.srcdoc = html;
+    hideError();
+    statusEl.textContent = 'Ready';
+    statusEl.className = 'status ready';
+  } catch (err) {
+    const msg = typeof err === 'string' ? err : err.message || String(err);
+    showError(msg);
+    statusEl.textContent = 'Error';
+    statusEl.className = 'status error';
+  }
+}
+
+function showError(msg) {
+  errorBar.textContent = msg;
+  errorBar.classList.add('visible');
+}
+function hideError() {
+  errorBar.classList.remove('visible');
+}
+
+// ── Auto-compile on input ──
+editorEl.addEventListener('input', scheduleCompile);
+
+// ── Draggable splitter ──
+let isDragging = false;
+splitter.addEventListener('mousedown', (e) => {
+  isDragging = true;
+  splitter.classList.add('dragging');
+  e.preventDefault();
+});
+document.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  const mainRect = document.querySelector('.main').getBoundingClientRect();
+  const pct = ((e.clientX - mainRect.left) / mainRect.width) * 100;
+  const clamped = Math.max(20, Math.min(80, pct));
+  editorPanel.style.width = clamped + '%';
+});
+document.addEventListener('mouseup', () => {
+  if (isDragging) {
+    isDragging = false;
+    splitter.classList.remove('dragging');
+  }
+});
+
+// ── Init ──
+loadWasm();
+</script>
+</body>
+</html>
