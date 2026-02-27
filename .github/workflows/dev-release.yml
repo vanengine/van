@@ -118,20 +118,20 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            artifact: van-cli-linux-x64
+            artifact: van-linux-x64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            artifact: van-cli-linux-arm64
+            artifact: van-linux-arm64
             cross: true
           - target: x86_64-apple-darwin
             os: macos-latest
-            artifact: van-cli-darwin-x64
+            artifact: van-darwin-x64
           - target: aarch64-apple-darwin
             os: macos-latest
-            artifact: van-cli-darwin-arm64
+            artifact: van-darwin-arm64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            artifact: van-cli-windows-x64.exe
+            artifact: van-windows-x64.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -148,7 +148,7 @@ jobs:
           echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }} -p van-cli
+        run: cargo build --release --target ${{ matrix.target }} -p van
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
@@ -204,11 +204,11 @@ jobs:
             artifacts/van-compiler-darwin-x64/*
             artifacts/van-compiler-darwin-arm64/*
             artifacts/van-compiler-windows-x64.exe/*
-            artifacts/van-cli-linux-x64/*
-            artifacts/van-cli-linux-arm64/*
-            artifacts/van-cli-darwin-x64/*
-            artifacts/van-cli-darwin-arm64/*
-            artifacts/van-cli-windows-x64.exe/*
+            artifacts/van-linux-x64/*
+            artifacts/van-linux-arm64/*
+            artifacts/van-darwin-x64/*
+            artifacts/van-darwin-arm64/*
+            artifacts/van-windows-x64.exe/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
