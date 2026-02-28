@@ -214,6 +214,12 @@ fn resolve_recursive(
         }
         child_module_imports.extend(child_resolved.module_imports);
 
+        // Collect slot component script_setup and module_imports
+        if let Some(ref ss) = slot_result.script_setup {
+            child_scripts.push(ss.clone());
+        }
+        child_module_imports.extend(slot_result.module_imports);
+
         // Collect child styles and slot component styles
         styles.extend(child_resolved.styles);
         styles.extend(slot_result.styles);
@@ -560,6 +566,8 @@ type SlotMap = HashMap<String, String>;
 struct SlotResult {
     slots: SlotMap,
     styles: Vec<String>,
+    script_setup: Option<String>,
+    module_imports: Vec<ResolvedModule>,
 }
 
 /// Parse `<template #name>...</template>` blocks and default content from children.
@@ -622,6 +630,8 @@ fn parse_slot_content(
     }
 
     // Process default slot content: resolve any child components using parent's import context
+    let mut script_setup = None;
+    let mut module_imports = Vec::new();
     if !default_parts.is_empty() {
         let default_content = default_parts.join("\n");
 
@@ -644,9 +654,11 @@ fn parse_slot_content(
 
         slots.insert("default".to_string(), resolved.html);
         styles.extend(resolved.styles);
+        script_setup = resolved.script_setup;
+        module_imports = resolved.module_imports;
     }
 
-    Ok(SlotResult { slots, styles })
+    Ok(SlotResult { slots, styles, script_setup, module_imports })
 }
 
 /// Resolve component tags within slot content using the parent's import context.
@@ -663,6 +675,8 @@ fn resolve_slot_components(
 ) -> Result<ResolvedComponent, String> {
     let mut result = content.to_string();
     let mut styles: Vec<String> = Vec::new();
+    let mut child_scripts: Vec<String> = Vec::new();
+    let mut child_module_imports: Vec<ResolvedModule> = Vec::new();
 
     loop {
         let tag_match = find_component_tag(&result, import_map);
@@ -692,6 +706,12 @@ fn resolve_slot_components(
         let with_slots = distribute_slots(&child_resolved.html, &HashMap::new(), debug, &HashMap::new());
         styles.extend(child_resolved.styles);
 
+        // Collect child script_setup and module_imports for merging
+        if let Some(ref cs) = child_resolved.script_setup {
+            child_scripts.push(cs.clone());
+        }
+        child_module_imports.extend(child_resolved.module_imports);
+
         let replacement = if debug {
             let theme_prefix = file_origins.get(&resolved_key)
                 .map(|t| format!("[{t}] "))
@@ -716,11 +736,18 @@ fn resolve_slot_components(
         interpolate(&result, data)
     };
 
+    // Merge collected child scripts
+    let script_setup = if !child_scripts.is_empty() {
+        Some(child_scripts.join("\n"))
+    } else {
+        None
+    };
+
     Ok(ResolvedComponent {
         html,
         styles,
-        script_setup: None,
-        module_imports: Vec::new(),
+        script_setup,
+        module_imports: child_module_imports,
     })
 }
 
