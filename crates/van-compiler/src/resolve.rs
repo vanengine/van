@@ -69,12 +69,18 @@ fn resolve_with_files_inner(
         .get(entry_path)
         .ok_or_else(|| format!("Entry file not found: {entry_path}"))?;
 
-    let blocks = parse_blocks(source);
-    let reactive_names = if let Some(ref script) = blocks.script_setup {
-        extract_reactive_names(script)
-    } else {
-        Vec::new()
-    };
+    // Collect reactive names from ALL .van files (entry + children),
+    // so that child-component reactive variables (e.g. `menuOpen`) are
+    // preserved during interpolation and not replaced by server data.
+    let mut reactive_names = Vec::new();
+    for (path, content) in files {
+        if path.ends_with(".van") {
+            let blk = parse_blocks(content);
+            if let Some(ref script) = blk.script_setup {
+                reactive_names.extend(extract_reactive_names(script));
+            }
+        }
+    }
 
     resolve_recursive(source, data, entry_path, files, 0, &reactive_names, debug, file_origins)
 }
@@ -126,6 +132,10 @@ fn resolve_recursive(
 
     // Expand v-for directives before component resolution
     template = expand_v_for(&template, data);
+
+    // Collect child script_setup and module_imports for merging
+    let mut child_scripts: Vec<String> = Vec::new();
+    let mut child_module_imports: Vec<ResolvedModule> = Vec::new();
 
     // Repeatedly find and replace component tags until none remain
     loop {
@@ -198,6 +208,12 @@ fn resolve_recursive(
             &template[tag_info.end..],
         );
 
+        // Collect child script_setup and module_imports for merging
+        if let Some(ref cs) = child_resolved.script_setup {
+            child_scripts.push(cs.clone());
+        }
+        child_module_imports.extend(child_resolved.module_imports);
+
         // Collect child styles and slot component styles
         styles.extend(child_resolved.styles);
         styles.extend(slot_result.styles);
@@ -211,37 +227,38 @@ fn resolve_recursive(
         interpolate(&template, data)
     };
 
-    // Capture script_setup and resolve module imports only at top level
-    let script_setup = if depth == 0 {
-        blocks.script_setup.clone()
-    } else {
-        None
-    };
+    // Merge this component's script_setup with collected child scripts
+    let mut script_setup = blocks.script_setup.clone();
+    if !child_scripts.is_empty() {
+        let merged = child_scripts.join("\n");
+        script_setup = Some(match script_setup {
+            Some(s) => format!("{s}\n{merged}"),
+            None => merged,
+        });
+    }
 
-    let module_imports = if depth == 0 {
-        if let Some(ref script) = blocks.script_setup {
-            let script_imports = parse_script_imports(script);
-            script_imports
-                .into_iter()
-                .filter_map(|imp| {
-                    if imp.is_type_only {
-                        return None; // type-only imports are erased
-                    }
-                    let resolved_key = resolve_virtual_path(current_path, &imp.path);
-                    let content = files.get(&resolved_key)?;
-                    Some(ResolvedModule {
-                        path: resolved_key,
-                        content: content.clone(),
-                        is_type_only: false,
-                    })
+    // Resolve module imports from this component and merge child module imports
+    let mut module_imports: Vec<ResolvedModule> = if let Some(ref script) = blocks.script_setup {
+        let script_imports = parse_script_imports(script);
+        script_imports
+            .into_iter()
+            .filter_map(|imp| {
+                if imp.is_type_only {
+                    return None; // type-only imports are erased
+                }
+                let resolved_key = resolve_virtual_path(current_path, &imp.path);
+                let content = files.get(&resolved_key)?;
+                Some(ResolvedModule {
+                    path: resolved_key,
+                    content: content.clone(),
+                    is_type_only: false,
                 })
-                .collect()
-        } else {
-            Vec::new()
-        }
+            })
+            .collect()
     } else {
         Vec::new()
     };
+    module_imports.extend(child_module_imports);
 
     Ok(ResolvedComponent {
         html,
