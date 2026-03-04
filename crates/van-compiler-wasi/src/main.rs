@@ -15,6 +15,9 @@ struct CompileRequest {
     /// Maps file paths to theme names (e.g. "components/header.van" → "van1").
     #[serde(default)]
     file_origins: HashMap<String, String>,
+    /// Custom global name for the signal runtime (default: "Van").
+    #[serde(default)]
+    global_name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -29,23 +32,18 @@ struct CompileResponse {
 }
 
 fn compile(req: CompileRequest) -> CompileResponse {
+    let global_name = req.global_name.as_deref().unwrap_or("Van");
+
     if let Some(ref prefix) = req.asset_prefix {
-        let compile_result = if req.debug {
-            van_compiler::compile_page_assets_debug(
-                &req.entry_path,
-                &req.files,
-                &req.data_json,
-                prefix,
-                &req.file_origins,
-            )
-        } else {
-            van_compiler::compile_page_assets(
-                &req.entry_path,
-                &req.files,
-                &req.data_json,
-                prefix,
-            )
-        };
+        let compile_result = van_compiler::compile_page_assets_full(
+            &req.entry_path,
+            &req.files,
+            &req.data_json,
+            prefix,
+            req.debug,
+            &req.file_origins,
+            global_name,
+        );
         match compile_result {
             Ok(result) => CompileResponse {
                 ok: true,
@@ -61,16 +59,14 @@ fn compile(req: CompileRequest) -> CompileResponse {
             },
         }
     } else {
-        let compile_result = if req.debug {
-            van_compiler::compile_page_debug(
-                &req.entry_path,
-                &req.files,
-                &req.data_json,
-                &req.file_origins,
-            )
-        } else {
-            van_compiler::compile_page(&req.entry_path, &req.files, &req.data_json)
-        };
+        let compile_result = van_compiler::compile_page_full(
+            &req.entry_path,
+            &req.files,
+            &req.data_json,
+            req.debug,
+            &req.file_origins,
+            global_name,
+        );
         match compile_result {
             Ok(html) => CompileResponse {
                 ok: true,

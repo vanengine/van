@@ -91,7 +91,7 @@
     });
   }
 
-  window.Van = {
+  window.__VAN_NS__ = {
     signal: signal,
     computed: computed,
     effect: effect,

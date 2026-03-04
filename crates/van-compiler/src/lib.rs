@@ -1,3 +1,4 @@
+mod i18n;
 mod resolve;
 pub mod render;
 
@@ -18,7 +19,7 @@ pub fn compile_page(
     files: &HashMap<String, String>,
     data_json: &str,
 ) -> Result<String, String> {
-    compile_page_with_debug(entry_path, files, data_json, false, &HashMap::new())
+    compile_page_with_debug(entry_path, files, data_json, false, &HashMap::new(), "Van")
 }
 
 /// Like `compile_page`, but with debug HTML comments at component/slot boundaries.
@@ -30,7 +31,7 @@ pub fn compile_page_debug(
     data_json: &str,
     file_origins: &HashMap<String, String>,
 ) -> Result<String, String> {
-    compile_page_with_debug(entry_path, files, data_json, true, file_origins)
+    compile_page_with_debug(entry_path, files, data_json, true, file_origins, "Van")
 }
 
 fn compile_page_with_debug(
@@ -39,6 +40,7 @@ fn compile_page_with_debug(
     data_json: &str,
     debug: bool,
     file_origins: &HashMap<String, String>,
+    global_name: &str,
 ) -> Result<String, String> {
     let data: serde_json::Value = serde_json::from_str(data_json)
         .map_err(|e| format!("Invalid JSON: {e}"))?;
@@ -47,7 +49,7 @@ fn compile_page_with_debug(
     } else {
         resolve::resolve_with_files(entry_path, files, &data)?
     };
-    render::render_page(&resolved, &data)
+    render::render_page(&resolved, &data, global_name)
 }
 
 /// Compile a multi-file `.van` project with separated assets.
@@ -60,7 +62,7 @@ pub fn compile_page_assets(
     data_json: &str,
     asset_prefix: &str,
 ) -> Result<PageAssets, String> {
-    compile_page_assets_with_debug(entry_path, files, data_json, asset_prefix, false, &HashMap::new())
+    compile_page_assets_with_debug(entry_path, files, data_json, asset_prefix, false, &HashMap::new(), "Van")
 }
 
 /// Like `compile_page_assets`, but with debug HTML comments at component/slot boundaries.
@@ -73,7 +75,7 @@ pub fn compile_page_assets_debug(
     asset_prefix: &str,
     file_origins: &HashMap<String, String>,
 ) -> Result<PageAssets, String> {
-    compile_page_assets_with_debug(entry_path, files, data_json, asset_prefix, true, file_origins)
+    compile_page_assets_with_debug(entry_path, files, data_json, asset_prefix, true, file_origins, "Van")
 }
 
 fn compile_page_assets_with_debug(
@@ -83,6 +85,7 @@ fn compile_page_assets_with_debug(
     asset_prefix: &str,
     debug: bool,
     file_origins: &HashMap<String, String>,
+    global_name: &str,
 ) -> Result<PageAssets, String> {
     let data: serde_json::Value = serde_json::from_str(data_json)
         .map_err(|e| format!("Invalid JSON: {e}"))?;
@@ -95,7 +98,32 @@ fn compile_page_assets_with_debug(
     // Derive page name from entry path: "pages/index.van" → "pages/index"
     let page_name = entry_path.trim_end_matches(".van");
 
-    render::render_page_assets(&resolved, &data, page_name, asset_prefix)
+    render::render_page_assets(&resolved, &data, page_name, asset_prefix, global_name)
+}
+
+/// Like `compile_page`, but with a custom signal runtime global name.
+pub fn compile_page_full(
+    entry_path: &str,
+    files: &HashMap<String, String>,
+    data_json: &str,
+    debug: bool,
+    file_origins: &HashMap<String, String>,
+    global_name: &str,
+) -> Result<String, String> {
+    compile_page_with_debug(entry_path, files, data_json, debug, file_origins, global_name)
+}
+
+/// Like `compile_page_assets`, but with a custom signal runtime global name.
+pub fn compile_page_assets_full(
+    entry_path: &str,
+    files: &HashMap<String, String>,
+    data_json: &str,
+    asset_prefix: &str,
+    debug: bool,
+    file_origins: &HashMap<String, String>,
+    global_name: &str,
+) -> Result<PageAssets, String> {
+    compile_page_assets_with_debug(entry_path, files, data_json, asset_prefix, debug, file_origins, global_name)
 }
 
 /// Compile a single `.van` file source into a full HTML page.
@@ -275,6 +303,82 @@ return { formatDate: formatDate };"#
         assert!(html.contains("effect"));
         // Type-only import should be erased (no __mod_1)
         assert!(!html.contains("__mod_1"));
+    }
+
+    #[test]
+    fn test_compile_single_i18n_basic() {
+        let source = r#"
+<template>
+  <h1>{{ $t('title') }}</h1>
+  <p>{{ $t('greeting', { name: userName }) }}</p>
+</template>
+"#;
+        let data = r#"{"userName": "Alice", "$i18n": {"title": "欢迎", "greeting": "你好，{name}！"}}"#;
+        let html = compile_single(source, data).unwrap();
+        assert!(html.contains("<h1>欢迎</h1>"));
+        assert!(html.contains("<p>你好，Alice！</p>"));
+    }
+
+    #[test]
+    fn test_compile_i18n_child_component_inherits() {
+        let mut files = HashMap::new();
+        files.insert(
+            "index.van".to_string(),
+            r#"
+<template>
+  <greeting :name="userName" />
+</template>
+
+<script setup>
+import Greeting from './greeting.van'
+</script>
+"#
+            .to_string(),
+        );
+        files.insert(
+            "greeting.van".to_string(),
+            r#"
+<template>
+  <p>{{ $t('hello') }}, {{ name }}!</p>
+</template>
+"#
+            .to_string(),
+        );
+
+        let data = r#"{"userName": "Bob", "$i18n": {"hello": "你好"}}"#;
+        let html = compile_page("index.van", &files, data).unwrap();
+        assert!(html.contains("你好, Bob!"));
+    }
+
+    #[test]
+    fn test_compile_i18n_prop_binding() {
+        let mut files = HashMap::new();
+        files.insert(
+            "index.van".to_string(),
+            r#"
+<template>
+  <img-comp :alt="$t('logo.alt')" />
+</template>
+
+<script setup>
+import ImgComp from './img-comp.van'
+</script>
+"#
+            .to_string(),
+        );
+        files.insert(
+            "img-comp.van".to_string(),
+            r#"
+<template>
+  <img alt="{{ alt }}" />
+</template>
+"#
+            .to_string(),
+        );
+
+        let data = r#"{"$i18n": {"logo": {"alt": "Logo图片"}}}"#;
+        let html = compile_page("index.van", &files, data).unwrap();
+        assert!(html.contains("Logo图片"));
     }
 
     #[test]

@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use van_parser::{add_scope_class, parse_blocks, parse_imports, parse_script_imports, scope_css, scope_id, VanImport};
 
-use crate::render::{escape_html, interpolate, resolve_path as resolve_json_path};
+use crate::render::{escape_html, interpolate, resolve_path as resolve_json_path, try_resolve_t};
 
 const MAX_DEPTH: usize = 10;
 
@@ -425,7 +425,13 @@ fn interpolate_skip_reactive(template: &str, data: &Value, reactive_names: &[Str
             let after_open = &rest[start + 3..];
             if let Some(end) = after_open.find("}}}") {
                 let expr = after_open[..end].trim();
-                if check_reactive(expr) {
+                // $t() is always resolved immediately (never reactive)
+                if let Some(translated) = try_resolve_t(expr, data) {
+                    result.push_str(&translated);
+                } else if expr.trim().starts_with("$t(") {
+                    // $t() but no $i18n data — preserve for runtime resolution
+                    result.push_str(&format!("{{{{{{{}}}}}}}", expr));
+                } else if check_reactive(expr) {
                     // Keep reactive as double-mustache for signal runtime
                     result.push_str(&format!("{{{{ {expr} }}}}"));
                 } else {
@@ -441,7 +447,13 @@ fn interpolate_skip_reactive(template: &str, data: &Value, reactive_names: &[Str
             let after_open = &rest[start + 2..];
             if let Some(end) = after_open.find("}}") {
                 let expr = after_open[..end].trim();
-                if check_reactive(expr) {
+                // $t() is always resolved immediately (never reactive)
+                if let Some(translated) = try_resolve_t(expr, data) {
+                    result.push_str(&escape_html(&translated));
+                } else if expr.trim().starts_with("$t(") {
+                    // $t() but no $i18n data — preserve for runtime resolution
+                    result.push_str(&format!("{{{{{}}}}}", expr));
+                } else if check_reactive(expr) {
                     result.push_str(&format!("{{{{ {expr} }}}}"));
                 } else {
                     let value = resolve_json_path(data, expr);
@@ -550,8 +562,18 @@ fn parse_props(attrs: &str, parent_data: &Value) -> Value {
     for cap in re.captures_iter(attrs) {
         let key = &cap[1];
         let expr = &cap[2];
-        let value_str = resolve_json_path(parent_data, expr);
+        // Resolve $t() calls in prop bindings
+        let value_str = if let Some(translated) = try_resolve_t(expr, parent_data) {
+            translated
+        } else {
+            resolve_json_path(parent_data, expr)
+        };
         map.insert(key.to_string(), Value::String(value_str));
+    }
+
+    // Inherit $i18n from parent so child components can use $t()
+    if let Some(i18n_data) = parent_data.get("$i18n") {
+        map.insert("$i18n".to_string(), i18n_data.clone());
     }
 
     Value::Object(map)

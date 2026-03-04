@@ -4,8 +4,9 @@ use std::collections::hash_map::DefaultHasher;
 
 use regex::Regex;
 use serde_json::Value;
-use van_signal_gen::{extract_initial_values, generate_signals, RUNTIME_JS};
+use van_signal_gen::{extract_initial_values, generate_signals, runtime_js};
 
+use crate::i18n;
 use crate::resolve::ResolvedComponent;
 
 /// Compute a short content hash (8 hex chars) for cache busting.
@@ -78,7 +79,7 @@ pub struct PageAssets {
 /// 4. Inject styles + scripts into clean HTML
 ///
 /// Unlike `van-dev-server`'s render, this does NOT inject `client.js` (WebSocket live reload).
-pub fn render_page(resolved: &ResolvedComponent, data: &Value) -> Result<String, String> {
+pub fn render_page(resolved: &ResolvedComponent, data: &Value, global_name: &str) -> Result<String, String> {
     let style_block: String = resolved
         .styles
         .iter()
@@ -96,9 +97,10 @@ pub fn render_page(resolved: &ResolvedComponent, data: &Value) -> Result<String,
 
     // Generate signal JS from the dirty HTML (before cleanup)
     let signal_scripts = if let Some(ref script_setup) = resolved.script_setup {
-        if let Some(signal_js) = generate_signals(script_setup, &resolved.html, &module_code) {
+        if let Some(signal_js) = generate_signals(script_setup, &resolved.html, &module_code, global_name) {
+            let runtime = runtime_js(global_name);
             format!(
-                "<script>{RUNTIME_JS}</script>\n<script>{signal_js}</script>"
+                "<script>{runtime}</script>\n<script>{signal_js}</script>"
             )
         } else {
             String::new()
@@ -154,6 +156,7 @@ pub fn render_page_assets(
     data: &Value,
     page_name: &str,
     asset_prefix: &str,
+    global_name: &str,
 ) -> Result<PageAssets, String> {
     let mut assets = HashMap::new();
 
@@ -178,12 +181,13 @@ pub fn render_page_assets(
 
     // Generate signal JS from the dirty HTML (before cleanup)
     let js_ref = if let Some(ref script_setup) = resolved.script_setup {
-        if let Some(signal_js) = generate_signals(script_setup, &resolved.html, &module_code) {
-            let runtime_hash = content_hash(RUNTIME_JS);
+        if let Some(signal_js) = generate_signals(script_setup, &resolved.html, &module_code, global_name) {
+            let runtime = runtime_js(global_name);
+            let runtime_hash = content_hash(&runtime);
             let runtime_path = format!("{}/js/van-runtime.{}.js", asset_prefix, runtime_hash);
             let js_hash = content_hash(&signal_js);
             let js_path = format!("{}/js/{}.{}.js", asset_prefix, page_name, js_hash);
-            assets.insert(runtime_path.clone(), RUNTIME_JS.to_string());
+            assets.insert(runtime_path.clone(), runtime);
             assets.insert(js_path.clone(), signal_js);
             format!(
                 r#"<script src="{runtime_path}"></script>
@@ -358,8 +362,14 @@ pub fn interpolate(template: &str, data: &Value) -> String {
             let after_open = &rest[start + 3..];
             if let Some(end) = after_open.find("}}}") {
                 let expr = after_open[..end].trim();
-                let value = resolve_path(data, expr);
-                result.push_str(&value);
+                if let Some(translated) = try_resolve_t(expr, data) {
+                    result.push_str(&translated);
+                } else if expr.trim().starts_with("$t(") {
+                    // $t() but no $i18n data — preserve for runtime resolution
+                    result.push_str(&format!("{{{{{{{}}}}}}}", expr));
+                } else {
+                    result.push_str(&resolve_path(data, expr));
+                }
                 rest = &after_open[end + 3..];
             } else {
                 result.push_str("{{{");
@@ -369,8 +379,14 @@ pub fn interpolate(template: &str, data: &Value) -> String {
             let after_open = &rest[start + 2..];
             if let Some(end) = after_open.find("}}") {
                 let expr = after_open[..end].trim();
-                let value = resolve_path(data, expr);
-                result.push_str(&escape_html(&value));
+                if let Some(translated) = try_resolve_t(expr, data) {
+                    result.push_str(&escape_html(&translated));
+                } else if expr.trim().starts_with("$t(") {
+                    // $t() but no $i18n data — preserve for runtime resolution
+                    result.push_str(&format!("{{{{{}}}}}", expr));
+                } else {
+                    result.push_str(&escape_html(&resolve_path(data, expr)));
+                }
                 rest = &after_open[end + 2..];
             } else {
                 result.push_str("{{");
@@ -380,6 +396,36 @@ pub fn interpolate(template: &str, data: &Value) -> String {
     }
     result.push_str(rest);
     result
+}
+
+/// Try to resolve a `$t(...)` expression. Returns `Some(translated)` if the
+/// expression is a valid `$t()` call, `None` otherwise.
+pub(crate) fn try_resolve_t(expr: &str, data: &Value) -> Option<String> {
+    let (key, params_str) = i18n::parse_t_call(expr)?;
+
+    // No $i18n data → return None so the expression is preserved for runtime resolution
+    let i18n_messages = data.get("$i18n")?;
+
+    let mut resolved_params = std::collections::HashMap::new();
+    if let Some(ref ps) = params_str {
+        for (k, v) in i18n::parse_t_params(ps) {
+            let value = match v {
+                i18n::ParamValue::Literal(lit) => lit,
+                i18n::ParamValue::DataPath(path) => {
+                    let resolved = resolve_path(data, &path);
+                    // If unresolved (still has {{ }}), use the path name as-is
+                    if resolved.contains("{{") {
+                        path
+                    } else {
+                        resolved
+                    }
+                }
+            };
+            resolved_params.insert(k, value);
+        }
+    }
+
+    Some(i18n::resolve_translation(&key, &resolved_params, i18n_messages))
 }
 
 /// Resolve a dot-separated path like `user.name` against a JSON value.
@@ -483,6 +529,79 @@ mod tests {
     }
 
     #[test]
+    fn test_interpolate_t_simple() {
+        let data = json!({
+            "$i18n": { "hello": "你好" }
+        });
+        assert_eq!(interpolate("{{ $t('hello') }}", &data), "你好");
+    }
+
+    #[test]
+    fn test_interpolate_t_with_params() {
+        let data = json!({
+            "userName": "Alice",
+            "$i18n": { "greeting": "你好，{name}！" }
+        });
+        assert_eq!(
+            interpolate("{{ $t('greeting', { name: userName }) }}", &data),
+            "你好，Alice！"
+        );
+    }
+
+    #[test]
+    fn test_interpolate_t_missing_key() {
+        let data = json!({ "$i18n": {} });
+        assert_eq!(interpolate("{{ $t('missing') }}", &data), "missing");
+    }
+
+    #[test]
+    fn test_interpolate_t_no_i18n_data() {
+        let data = json!({});
+        assert_eq!(interpolate("{{ $t('hello') }}", &data), "{{$t('hello')}}");
+    }
+
+    #[test]
+    fn test_interpolate_t_triple_mustache() {
+        let data = json!({
+            "$i18n": { "html_content": "<b>粗体</b>" }
+        });
+        // Triple mustache: raw output, no escaping
+        assert_eq!(
+            interpolate("{{{ $t('html_content') }}}", &data),
+            "<b>粗体</b>"
+        );
+        // Double mustache: HTML escaped
+        assert_eq!(
+            interpolate("{{ $t('html_content') }}", &data),
+            "&lt;b&gt;粗体&lt;/b&gt;"
+        );
+    }
+
+    #[test]
+    fn test_interpolate_t_plural() {
+        let data = json!({
+            "itemCount": 3,
+            "$i18n": { "items": "没有项目 | 1 个项目 | {count} 个项目" }
+        });
+        assert_eq!(
+            interpolate("{{ $t('items', { count: itemCount }) }}", &data),
+            "3 个项目"
+        );
+    }
+
+    #[test]
+    fn test_interpolate_t_mixed_with_regular() {
+        let data = json!({
+            "name": "World",
+            "$i18n": { "hello": "你好" }
+        });
+        assert_eq!(
+            interpolate("{{ $t('hello') }}, {{ name }}!", &data),
+            "你好, World!"
+        );
+    }
+
+    #[test]
     fn test_render_page_basic() {
         let resolved = ResolvedComponent {
             html: "<h1>Hello</h1>".to_string(),
@@ -491,7 +610,7 @@ mod tests {
             module_imports: Vec::new(),
         };
         let data = json!({});
-        let html = render_page(&resolved, &data).unwrap();
+        let html = render_page(&resolved, &data, "Van").unwrap();
         assert!(html.contains("<h1>Hello</h1>"));
         assert!(html.contains("h1 { color: red; }"));
         // Should NOT contain client.js WebSocket reload

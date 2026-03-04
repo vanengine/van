@@ -1,8 +1,15 @@
 use std::collections::HashMap;
 use regex::Regex;
 
-/// The embedded signal runtime JS (~1KB).
+/// The embedded signal runtime JS (~1KB) with `__VAN_NS__` placeholder.
 pub const RUNTIME_JS: &str = include_str!("runtime.js");
+
+const NAMESPACE_PLACEHOLDER: &str = "__VAN_NS__";
+
+/// Return the runtime JS with `__VAN_NS__` replaced by the given global name.
+pub fn runtime_js(global_name: &str) -> String {
+    RUNTIME_JS.replace(NAMESPACE_PLACEHOLDER, global_name)
+}
 
 /// Extract initial values of `ref()` signals from a `<script setup>` block.
 ///
@@ -979,7 +986,7 @@ fn strip_imports(script: &str) -> String {
 ///
 /// `module_code` contains resolved .ts/.js content (already transpiled to JS) to be
 /// inlined before signal declarations. Each entry is wrapped in an IIFE.
-pub fn generate_signals(script_setup: &str, template_html: &str, module_code: &[String]) -> Option<String> {
+pub fn generate_signals(script_setup: &str, template_html: &str, module_code: &[String], global_name: &str) -> Option<String> {
     let clean_script = strip_imports(script_setup);
     let analysis = analyze_script(&clean_script);
 
@@ -1002,7 +1009,7 @@ pub fn generate_signals(script_setup: &str, template_html: &str, module_code: &[
 
     let mut js = String::new();
     js.push_str("(function() {\n");
-    js.push_str("  var V = Van;\n");
+    js.push_str(&format!("  var V = {};\n", global_name));
 
     // Inlined module code
     for (i, code) in module_code.iter().enumerate() {
@@ -1378,7 +1385,7 @@ function decrement() { count.value-- }
         // Simulate resolved body content
         let html = r#"<body><nav>nav</nav><main><h1>Title</h1><div class="counter"><p>Count: {{ count }}</p><button @click="increment">+1</button><button @click="decrement">-1</button></div></main></body>"#;
 
-        let js = generate_signals(script, html, &[]).unwrap();
+        let js = generate_signals(script, html, &[], "Van").unwrap();
 
         // Should use positional paths, NOT querySelectorAll
         assert!(!js.contains("querySelectorAll"));
@@ -1405,7 +1412,7 @@ function decrement() { count.value-- }
 defineProps({ title: String })
 "#;
         let html = r#"<div><h1>Hello</h1></div>"#;
-        assert!(generate_signals(script, html, &[]).is_none());
+        assert!(generate_signals(script, html, &[], "Van").is_none());
     }
 
     #[test]
@@ -1424,10 +1431,37 @@ defineProps({ title: String })
 
     #[test]
     fn test_runtime_js_included() {
-        assert!(RUNTIME_JS.contains("Van"));
+        assert!(RUNTIME_JS.contains("__VAN_NS__"));
         assert!(RUNTIME_JS.contains("signal"));
         assert!(RUNTIME_JS.contains("effect"));
         assert!(RUNTIME_JS.contains("computed"));
+    }
+
+    #[test]
+    fn test_runtime_js_default_name() {
+        let js = runtime_js("Van");
+        assert!(js.contains("window.Van"));
+        assert!(!js.contains("__VAN_NS__"));
+    }
+
+    #[test]
+    fn test_runtime_js_custom_name() {
+        let js = runtime_js("MyApp");
+        assert!(js.contains("window.MyApp"));
+        assert!(!js.contains("window.Van"));
+        assert!(!js.contains("__VAN_NS__"));
+    }
+
+    #[test]
+    fn test_generate_signals_custom_global_name() {
+        let script = r#"
+const count = ref(0)
+function increment() { count.value++ }
+"#;
+        let html = r#"<div><p>{{ count }}</p><button @click="increment">+</button></div>"#;
+        let js = generate_signals(script, html, &[], "MyApp").unwrap();
+        assert!(js.contains("var V = MyApp;"));
+        assert!(!js.contains("var V = Van;"));
     }
 
     #[test]
@@ -1463,7 +1497,7 @@ const open = ref(false)
 function toggle() { open.value = !open.value }
 "#;
         let html = r#"<div><button @click="toggle">Toggle</button><Transition name="fade"><div v-show="open">Content</div></Transition></div>"#;
-        let js = generate_signals(script, html, &[]).unwrap();
+        let js = generate_signals(script, html, &[], "Van").unwrap();
         // Should use V.transition() instead of style.display
         assert!(js.contains("V.transition("));
         assert!(js.contains("'fade'"));
@@ -1545,7 +1579,7 @@ function toggle() { open.value = !open.value }
 const isActive = ref(true)
 "#;
         let html = r#"<div :class="[{ active: isActive }, 'base']"><p>Hello</p></div>"#;
-        let js = generate_signals(script, html, &[]).unwrap();
+        let js = generate_signals(script, html, &[], "Van").unwrap();
         // Should have classList.toggle for object item
         assert!(js.contains("classList.toggle('active'"));
         // Should have classList.add for static item
@@ -1559,7 +1593,7 @@ const textColor = ref('red')
 const size = ref('16px')
 "#;
         let html = r#"<div :style="[{ color: textColor }, { fontSize: size }]">Hello</div>"#;
-        let js = generate_signals(script, html, &[]).unwrap();
+        let js = generate_signals(script, html, &[], "Van").unwrap();
         assert!(js.contains("style.color"));
         assert!(js.contains("style.fontSize"));
         assert!(js.contains("textColor.value"));
@@ -1577,7 +1611,7 @@ function increment() { count.value++ }
         let modules = vec![
             "function formatDate(d) { return d.toISOString(); }\nreturn { formatDate: formatDate };".to_string(),
         ];
-        let js = generate_signals(script, html, &modules).unwrap();
+        let js = generate_signals(script, html, &modules, "Van").unwrap();
         // Should have module IIFE
         assert!(js.contains("var __mod_0 = (function()"));
         assert!(js.contains("formatDate"));
@@ -1595,7 +1629,7 @@ import type { User } from '../types.ts'
 const count = ref(0)
 "#;
         let html = r#"<div><p>{{ count }}</p></div>"#;
-        let js = generate_signals(script, html, &[]).unwrap();
+        let js = generate_signals(script, html, &[], "Van").unwrap();
         assert!(js.contains("V.signal(0)"));
     }
 }
