@@ -306,9 +306,15 @@ fn extract_style(source: &str) -> (Option<String>, bool) {
     let open = "<style";
     let close = "</style>";
 
-    let Some(start_idx) = source.find(open) else {
+    // Only match top-level <style> blocks (after </template>), not <style> inside <template>
+    let search_start = source.rfind("</template>")
+        .map(|i| i + "</template>".len())
+        .unwrap_or(0);
+
+    let Some(rel_idx) = source[search_start..].find(open) else {
         return (None, false);
     };
+    let start_idx = search_start + rel_idx;
     let after_open = &source[start_idx..];
     let Some(tag_end) = after_open.find('>') else {
         return (None, false);
