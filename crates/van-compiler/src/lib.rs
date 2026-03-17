@@ -407,3 +407,45 @@ const count = ref(0)
         assert!(html.contains("V.signal(0)"));
     }
 }
+
+#[cfg(test)]
+mod layout_html_test {
+    use super::*;
+
+    #[test]
+    fn test_layout_html_propagates() {
+        let mut files = HashMap::new();
+        files.insert("pages/index.van".to_string(), r#"
+<script setup>
+import Layout from '../components/Layout.van'
+</script>
+<template>
+  <Layout title="Dashboard">
+    <h1>Hello</h1>
+  </Layout>
+</template>
+"#.to_string());
+
+        files.insert("components/Layout.van".to_string(), r#"
+<script setup>
+defineProps({ title: String })
+</script>
+<template>
+  <html lang="en">
+  <head>
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <slot />
+  </body>
+  </html>
+</template>
+"#.to_string());
+
+        let result = compile_page("pages/index.van", &files, "{}").unwrap();
+        assert!(result.contains("<html"), "Output should contain <html tag from Layout. Got:\n{}", result);
+        assert!(result.contains("/style.css"), "Output should contain CSS link from Layout. Got:\n{}", result);
+        assert!(!result.contains("Van Playground"), "Output should NOT use default shell. Got:\n{}", result);
+    }
+}

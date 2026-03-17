@@ -482,10 +482,19 @@ struct TagInfo {
 }
 
 /// Find the first component tag in the template that matches an import.
+/// Searches both kebab-case (`default-layout`) and PascalCase (`DefaultLayout`) forms.
 fn find_component_tag(template: &str, import_map: &HashMap<String, &VanImport>) -> Option<TagInfo> {
-    for tag_name in import_map.keys() {
+    for (tag_name, imp) in import_map {
+        // Try kebab-case first (e.g. `<default-layout>`)
         if let Some(info) = extract_component_tag(template, tag_name) {
             return Some(info);
+        }
+        // Try PascalCase (e.g. `<DefaultLayout>`)
+        if imp.name != *tag_name {
+            if let Some(mut info) = extract_component_tag(template, &imp.name) {
+                info.tag_name = tag_name.clone(); // normalize to kebab for import_map lookup
+                return Some(info);
+            }
         }
     }
     None
