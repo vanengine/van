@@ -497,15 +497,50 @@ struct TagInfo {
     end: usize,
 }
 
+/// Known HTML and SVG element names that must not be matched as components.
+fn is_html_element(tag: &str) -> bool {
+    matches!(tag,
+        "a" | "abbr" | "address" | "area" | "article" | "aside" | "audio"
+        | "b" | "base" | "bdi" | "bdo" | "blockquote" | "body" | "br" | "button"
+        | "canvas" | "caption" | "cite" | "code" | "col" | "colgroup"
+        | "data" | "datalist" | "dd" | "del" | "details" | "dfn" | "dialog" | "div" | "dl" | "dt"
+        | "em" | "embed"
+        | "fieldset" | "figcaption" | "figure" | "footer" | "form"
+        | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "head" | "header" | "hgroup" | "hr" | "html"
+        | "i" | "iframe" | "img" | "input" | "ins"
+        | "kbd" | "label" | "legend" | "li" | "link"
+        | "main" | "map" | "mark" | "menu" | "meta" | "meter"
+        | "nav" | "noscript"
+        | "object" | "ol" | "optgroup" | "option" | "output"
+        | "p" | "picture" | "pre" | "progress"
+        | "q" | "rp" | "rt" | "ruby"
+        | "s" | "samp" | "script" | "search" | "section" | "select" | "small" | "source"
+        | "span" | "strong" | "style" | "sub" | "summary" | "sup"
+        | "table" | "tbody" | "td" | "template" | "textarea" | "tfoot" | "th" | "thead"
+        | "time" | "title" | "tr" | "track"
+        | "u" | "ul" | "var" | "video" | "wbr"
+        // SVG elements
+        | "svg" | "path" | "circle" | "rect" | "line" | "polyline" | "polygon"
+        | "ellipse" | "text" | "tspan" | "g" | "defs" | "use" | "symbol"
+        | "clippath" | "mask" | "pattern" | "image" | "foreignobject"
+        | "animate" | "animatetransform" | "set"
+    )
+}
+
 /// Find the first component tag in the template that matches an import.
 /// Searches both kebab-case (`default-layout`) and PascalCase (`DefaultLayout`) forms.
+/// Kebab-case matching is skipped when the tag name collides with a known HTML/SVG element
+/// to prevent infinite loops (e.g. component `Header` → kebab `header` matching `<header>` HTML).
 fn find_component_tag(template: &str, import_map: &HashMap<String, &VanImport>) -> Option<TagInfo> {
     for (tag_name, imp) in import_map {
-        // Try kebab-case first (e.g. `<default-layout>`)
-        if let Some(info) = extract_component_tag(template, tag_name) {
-            return Some(info);
+        // Try kebab-case (e.g. `<default-layout>`), but skip if it's a known HTML/SVG element.
+        // e.g. import Header → kebab "header" matches <header> HTML element — skip.
+        if !is_html_element(tag_name) {
+            if let Some(info) = extract_component_tag(template, tag_name) {
+                return Some(info);
+            }
         }
-        // Try PascalCase (e.g. `<DefaultLayout>`)
+        // Try PascalCase (e.g. `<Header>`, `<DefaultLayout>`)
         if imp.name != *tag_name {
             if let Some(mut info) = extract_component_tag(template, &imp.name) {
                 info.tag_name = tag_name.clone(); // normalize to kebab for import_map lookup
@@ -1509,5 +1544,37 @@ import Card from './card.van'
         assert_eq!(resolved.html.matches("class=").count(), 1, "Only the original class attr");
         assert!(resolved.html.contains("class=\"app\""), "Original class preserved");
         assert_eq!(resolved.styles[0], ".app { margin: 0; }");
+    }
+
+    #[test]
+    fn test_resolve_component_name_same_as_html_element() {
+        // Regression: component named `Header` → kebab `header` collides with <header> HTML element.
+        // Previously caused infinite loop: output <header> re-matched as component.
+        let mut files = HashMap::new();
+        files.insert(
+            "index.van".to_string(),
+            r#"
+<template>
+  <Header :title="title" />
+</template>
+
+<script setup>
+import Header from './Header.van'
+</script>
+"#.to_string(),
+        );
+        files.insert(
+            "Header.van".to_string(),
+            r#"
+<template>
+  <header><h1>{{ title }}</h1></header>
+</template>
+"#.to_string(),
+        );
+
+        let data = json!({"title": "My Site"});
+        let resolved = resolve_with_files("index.van", &files, &data).unwrap();
+        assert!(resolved.html.contains("<header>"), "Should contain <header> HTML element");
+        assert!(resolved.html.contains("<h1>My Site</h1>"), "Should interpolate title prop");
     }
 }
