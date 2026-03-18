@@ -37,8 +37,8 @@ pub fn run() -> Result<()> {
             .unwrap_or(serde_json::json!({}));
         let data_json = serde_json::to_string(&page_data)?;
 
-        let html = van_compiler::compile_page(entry, &files, &data_json)
-            .map_err(|e| anyhow::anyhow!("Failed to compile {}: {}", entry, e))?;
+        let html = van_compiler::render_to_string(entry, &files, &data_json)
+            .map_err(|e| anyhow::anyhow!("Failed to render {}: {}", entry, e))?;
 
         // Write output: index.van -> dist/index.html, other.van -> dist/other/index.html
         let output_path = if stem == "index" {

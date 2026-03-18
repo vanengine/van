@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 struct CompileRequest {
     entry_path: String,
     files: HashMap<String, String>,
-    data_json: String,
+    data_json: Option<String>,
     #[serde(default)]
     asset_prefix: Option<String>,
     #[serde(default)]
@@ -35,16 +35,18 @@ fn compile(req: CompileRequest) -> CompileResponse {
     let global_name = req.global_name.as_deref().unwrap_or("Van");
 
     if let Some(ref prefix) = req.asset_prefix {
-        let compile_result = van_compiler::compile_page_assets_full(
-            &req.entry_path,
-            &req.files,
-            &req.data_json,
-            prefix,
-            req.debug,
-            &req.file_origins,
-            global_name,
-        );
-        match compile_result {
+        let result = if let Some(ref data_json) = req.data_json {
+            van_compiler::render_to_assets_full(
+                &req.entry_path, &req.files, data_json, prefix,
+                req.debug, &req.file_origins, global_name,
+            )
+        } else {
+            van_compiler::compile_assets_full(
+                &req.entry_path, &req.files, prefix,
+                req.debug, &req.file_origins, global_name,
+            )
+        };
+        match result {
             Ok(result) => CompileResponse {
                 ok: true,
                 html: Some(result.html),
@@ -59,15 +61,18 @@ fn compile(req: CompileRequest) -> CompileResponse {
             },
         }
     } else {
-        let compile_result = van_compiler::compile_page_full(
-            &req.entry_path,
-            &req.files,
-            &req.data_json,
-            req.debug,
-            &req.file_origins,
-            global_name,
-        );
-        match compile_result {
+        let result = if let Some(ref data_json) = req.data_json {
+            van_compiler::render_to_string_full(
+                &req.entry_path, &req.files, data_json,
+                req.debug, &req.file_origins, global_name,
+            )
+        } else {
+            van_compiler::compile_full(
+                &req.entry_path, &req.files,
+                req.debug, &req.file_origins, global_name,
+            )
+        };
+        match result {
             Ok(html) => CompileResponse {
                 ok: true,
                 html: Some(html),

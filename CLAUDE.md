@@ -63,11 +63,15 @@ Cargo workspace with 8 crates (version managed at workspace level in root `Cargo
                               └── [van-signal-gen] → Signal-based JS (direct DOM ops, no virtual DOM)
 ```
 
-Two compilation modes in `van-compiler`: `compile_page()` (inline assets) and `compile_page_assets()` (separate JS/CSS with asset hashing). Both have `_debug()` variants that add HTML comments at component/slot boundaries.
+Two modes in `van-compiler` following Vue's compile/render convention:
+- **Compile** (no data): `compile()` / `compile_assets()` — preserves `{{ }}`, `v-for`, `v-if` for Java runtime
+- **Render** (with data): `render_to_string()` / `render_to_assets()` — binds data and produces final HTML
 
-**Internal call chain:** `compile_page()` → `resolve::resolve_with_files()` (recursive import resolution, max depth 10) → `render::render_page()` → `van_signal_gen::generate_signals()` → inject CSS/JS into HTML.
+Both have `_full()` variants for custom options, and `render_to_string_debug()` adds HTML comments at component/slot boundaries.
 
-Additional entry points: `compile_single()` for single-file compilation without a files map, `compile_van()` as a wasm-bindgen export (`#[cfg(feature = "wasm")]`).
+**Internal call chain:** `build_page()` → `resolve::resolve_with_files()` (recursive import resolution, max depth 10) → `render::render_to_string()` or `render::compile()` → `van_signal_gen::generate_signals()` → inject CSS/JS into HTML.
+
+Additional entry points: `compile_single()` / `render_single()` for single-file compilation, `compile_van()` as a wasm-bindgen export (`#[cfg(feature = "wasm")]`).
 
 ## Error Handling Patterns
 

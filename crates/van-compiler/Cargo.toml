@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "Server-side HTML compiler for Van template engine (.van files)"
-keywords = ["van", "template", "compiler", "html", "ssr"]
+keywords = ["van", "template", "compiler", "html", "render"]
 categories = ["template-engine", "compilers"]
 
 [lib]

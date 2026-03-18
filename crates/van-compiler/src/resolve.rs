@@ -131,7 +131,16 @@ fn resolve_recursive(
         .collect();
 
     // Expand v-for directives before component resolution
-    template = expand_v_for(&template, data);
+    // In compile mode (no data): preserve directives for Java runtime
+    let compile = matches!(data, Value::Object(map) if map.is_empty());
+    if !compile {
+        template = expand_v_for(&template, data);
+    }
+
+    // In compile mode, replace <ClientOnly> tags with comment markers
+    if compile {
+        template = replace_client_only_tags(&template);
+    }
 
     // Collect child script_setup and module_imports for merging
     let mut child_scripts: Vec<String> = Vec::new();
@@ -227,6 +236,8 @@ fn resolve_recursive(
 
     // Reactive-aware interpolation: leave reactive {{ expr }} as-is for
     // signal gen to find via tree walking; interpolate non-reactive ones.
+    // In compile mode: props are injected as {{ expr }} by parse_props, and
+    // interpolation preserves values containing {{ (skips escape_html).
     let html = if !reactive_names.is_empty() {
         interpolate_skip_reactive(&template, data, reactive_names)
     } else {
@@ -436,7 +447,7 @@ fn interpolate_skip_reactive(template: &str, data: &Value, reactive_names: &[Str
                     result.push_str(&format!("{{{{ {expr} }}}}"));
                 } else {
                     let value = resolve_json_path(data, expr);
-                    result.push_str(&value);
+                    result.push_str(&value); // Raw output — no escape for {{{ }}}
                 }
                 rest = &after_open[end + 3..];
             } else {
@@ -457,7 +468,12 @@ fn interpolate_skip_reactive(template: &str, data: &Value, reactive_names: &[Str
                     result.push_str(&format!("{{{{ {expr} }}}}"));
                 } else {
                     let value = resolve_json_path(data, expr);
-                    result.push_str(&escape_html(&value));
+                    if value.contains("{{") {
+                        // Value is an unresolved or compile expression — preserve for Java
+                        result.push_str(&value);
+                    } else {
+                        result.push_str(&escape_html(&value));
+                    }
                 }
                 rest = &after_open[end + 2..];
             } else {
@@ -565,14 +581,16 @@ fn extract_component_tag(template: &str, tag_name: &str) -> Option<TagInfo> {
 
 /// Parse `:prop="expr"` attributes and resolve them against parent data.
 fn parse_props(attrs: &str, parent_data: &Value) -> Value {
+    let compile = matches!(parent_data, Value::Object(m) if m.is_empty());
     let re = Regex::new(r#":(\w+)="([^"]*)""#).unwrap();
     let mut map = serde_json::Map::new();
-
     for cap in re.captures_iter(attrs) {
         let key = &cap[1];
         let expr = &cap[2];
-        // Resolve $t() calls in prop bindings
-        let value_str = if let Some(translated) = try_resolve_t(expr, parent_data) {
+        let value_str = if compile {
+            // Compile-only mode: inject expression as {{ expr }} for Java to resolve
+            format!("{{{{ {} }}}}", expr)
+        } else if let Some(translated) = try_resolve_t(expr, parent_data) {
             translated
         } else {
             resolve_json_path(parent_data, expr)
@@ -948,6 +966,14 @@ fn expand_v_for(template: &str, data: &Value) -> String {
     }
 
     result
+}
+
+/// Replace `<ClientOnly>...</ClientOnly>` tags with `<!--client-only-->...<!--/client-only-->` markers.
+fn replace_client_only_tags(html: &str) -> String {
+    let open_re = Regex::new(r"(?i)<ClientOnly\s*/?>").unwrap();
+    let close_re = Regex::new(r"(?i)</ClientOnly\s*>").unwrap();
+    let result = open_re.replace_all(html, "<!--client-only-->").to_string();
+    close_re.replace_all(&result, "<!--/client-only-->").to_string()
 }
 
 fn parse_vfor_expr(expr: &str) -> (String, Option<String>, String) {

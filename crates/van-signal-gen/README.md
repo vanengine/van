@@ -28,7 +28,7 @@ if let Some(js) = generate_signals(script, template, &[]) {
 | Function | Description |
 |---|---|
 | `generate_signals(script, template, modules)` | Generate client-side JS from script setup + template |
-| `extract_initial_values(script)` | Extract `ref()` initial values for SSR interpolation |
+| `extract_initial_values(script)` | Extract `ref()` initial values for server-side interpolation |
 | `analyze_script(script)` | Analyze signals, computed, watchers in script |
 | `walk_template(html, reactive_names)` | Find reactive bindings in template HTML |
 

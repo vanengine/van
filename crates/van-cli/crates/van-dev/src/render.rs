@@ -39,7 +39,7 @@ pub fn render_from_files(
 ) -> Result<String> {
     let data_json = serde_json::to_string(data)?;
     let mut html =
-        van_compiler::compile_page_debug(entry_path, files, &data_json, file_origins)
+        van_compiler::render_to_string_debug(entry_path, files, &data_json, file_origins)
             .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let client_script = format!("<script>{CLIENT_JS}</script>");
@@ -54,7 +54,7 @@ pub fn render_static_from_files(
     data: &Value,
 ) -> Result<String> {
     let data_json = serde_json::to_string(data)?;
-    van_compiler::compile_page(entry_path, files, &data_json)
+    van_compiler::render_to_string(entry_path, files, &data_json)
         .map_err(|e| anyhow::anyhow!("{e}"))
 }
 

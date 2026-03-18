@@ -4,7 +4,7 @@ use std::collections::hash_map::DefaultHasher;
 
 use regex::Regex;
 use serde_json::Value;
-use van_signal_gen::{extract_initial_values, generate_signals, runtime_js};
+use van_signal_gen::{extract_initial_values, generate_signals, generate_signals_compile, runtime_js};
 
 use crate::i18n;
 use crate::resolve::ResolvedComponent;
@@ -79,7 +79,7 @@ pub struct PageAssets {
 /// 4. Inject styles + scripts into clean HTML
 ///
 /// Unlike `van-dev-server`'s render, this does NOT inject `client.js` (WebSocket live reload).
-pub fn render_page(resolved: &ResolvedComponent, data: &Value, global_name: &str) -> Result<String, String> {
+pub fn render_to_string(resolved: &ResolvedComponent, data: &Value, global_name: &str) -> Result<String, String> {
     let style_block: String = resolved
         .styles
         .iter()
@@ -109,7 +109,7 @@ pub fn render_page(resolved: &ResolvedComponent, data: &Value, global_name: &str
         String::new()
     };
 
-    // Augment data with signal initial values for SSR (e.g. {{ count }} → 0)
+    // Augment data with signal initial values (e.g. {{ count }} → 0)
     let augmented_data =
         augment_data_with_signals(data, resolved.script_setup.as_deref());
 
@@ -151,7 +151,7 @@ pub fn render_page(resolved: &ResolvedComponent, data: &Value, global_name: &str
 ///
 /// `asset_prefix` determines the URL path prefix for assets,
 /// e.g. "/themes/van1/assets" → produces "/themes/van1/assets/css/page.css".
-pub fn render_page_assets(
+pub fn render_to_assets(
     resolved: &ResolvedComponent,
     data: &Value,
     page_name: &str,
@@ -200,7 +200,7 @@ pub fn render_page_assets(
         String::new()
     };
 
-    // Augment data with signal initial values for SSR (e.g. {{ count }} → 0)
+    // Augment data with signal initial values (e.g. {{ count }} → 0)
     let augmented_data =
         augment_data_with_signals(data, resolved.script_setup.as_deref());
 
@@ -231,6 +231,159 @@ pub fn render_page_assets(
     };
 
     Ok(PageAssets { html, assets })
+}
+
+/// Compile mode: produce page HTML preserving v-for/v-if/:class for Java runtime.
+/// Only strips @click/v-model, keeps {{ }} and runtime directives intact.
+/// ClientOnly blocks still get full signal JS generation.
+pub fn compile(resolved: &ResolvedComponent, global_name: &str) -> Result<String, String> {
+    let style_block: String = resolved
+        .styles
+        .iter()
+        .map(|css| format!("<style>{css}</style>"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Generate signal JS only for ClientOnly blocks (using comment anchor + DFS)
+    let module_code: Vec<String> = resolved
+        .module_imports
+        .iter()
+        .filter(|m| !m.is_type_only)
+        .map(|m| m.content.clone())
+        .collect();
+
+    let signal_scripts = if let Some(ref script_setup) = resolved.script_setup {
+        if let Some(signal_js) = generate_signals_compile(script_setup, &resolved.html, &module_code, global_name) {
+            let runtime = runtime_js(global_name);
+            format!("<script>{runtime}</script>\n<script>{signal_js}</script>")
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    // Compile cleanup: only strip @click/v-model, keep v-for/v-if/:class/{{ }}
+    let clean_html = cleanup_html_compile(&resolved.html);
+
+    if clean_html.contains("<html") {
+        let mut html = clean_html;
+        inject_before_close(&mut html, "</head>", &style_block);
+        inject_before_close(&mut html, "</body>", &signal_scripts);
+        Ok(html)
+    } else {
+        Ok(format!(
+            r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Van App</title>
+{style_block}
+</head>
+<body>
+{clean_html}
+{signal_scripts}
+</body>
+</html>"#
+        ))
+    }
+}
+
+/// Compile mode: produce page with separated assets.
+pub fn compile_assets(
+    resolved: &ResolvedComponent,
+    page_name: &str,
+    asset_prefix: &str,
+    global_name: &str,
+) -> Result<PageAssets, String> {
+    let mut assets = HashMap::new();
+
+    let css_ref = if !resolved.styles.is_empty() {
+        let css_content: String = resolved.styles.join("\n");
+        let hash = content_hash(&css_content);
+        let css_path = format!("{}/css/{}.{}.css", asset_prefix, page_name, hash);
+        assets.insert(css_path.clone(), css_content);
+        format!(r#"<link rel="stylesheet" href="{css_path}">"#)
+    } else {
+        String::new()
+    };
+
+    let module_code: Vec<String> = resolved
+        .module_imports
+        .iter()
+        .filter(|m| !m.is_type_only)
+        .map(|m| m.content.clone())
+        .collect();
+
+    let js_ref = if let Some(ref script_setup) = resolved.script_setup {
+        if let Some(signal_js) = generate_signals_compile(script_setup, &resolved.html, &module_code, global_name) {
+            let runtime = runtime_js(global_name);
+            let runtime_hash = content_hash(&runtime);
+            let runtime_path = format!("{}/js/van-runtime.{}.js", asset_prefix, runtime_hash);
+            let js_hash = content_hash(&signal_js);
+            let js_path = format!("{}/js/{}.{}.js", asset_prefix, page_name, js_hash);
+            assets.insert(runtime_path.clone(), runtime);
+            assets.insert(js_path.clone(), signal_js);
+            format!(
+                r#"<script src="{runtime_path}"></script>
+<script src="{js_path}"></script>"#
+            )
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    let clean_html = cleanup_html_compile(&resolved.html);
+
+    let html = if clean_html.contains("<html") {
+        let mut html = clean_html;
+        inject_before_close(&mut html, "</head>", &css_ref);
+        inject_before_close(&mut html, "</body>", &js_ref);
+        html
+    } else {
+        format!(
+            r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Van App</title>
+{css_ref}
+</head>
+<body>
+{clean_html}
+{js_ref}
+</body>
+</html>"#
+        )
+    };
+
+    Ok(PageAssets { html, assets })
+}
+
+/// Compile cleanup: strip only @click/v-model events, keep runtime directives for Java.
+/// Preserves: v-for, v-if, v-else-if, v-else, v-show, :class, :style, :href, {{ }}, v-html, v-text
+/// Strips: @click, @input, v-model, <Transition>
+fn cleanup_html_compile(html: &str) -> String {
+    let mut result = html.to_string();
+
+    // Strip @event="..." attributes
+    let event_re = Regex::new(r#"\s*@\w+="[^"]*""#).unwrap();
+    result = event_re.replace_all(&result, "").to_string();
+
+    // Strip <Transition> / </Transition> wrapper tags
+    let transition_re = Regex::new(r#"</?[Tt]ransition[^>]*>"#).unwrap();
+    result = transition_re.replace_all(&result, "").to_string();
+
+    // Strip v-model="..." (client-only directive)
+    let model_re = Regex::new(r#"\s*v-model="[^"]*""#).unwrap();
+    result = model_re.replace_all(&result, "").to_string();
+
+    // Everything else (v-for, v-if, v-show, :class, :style, :href, {{ }}) is PRESERVED
+    result
 }
 
 /// Clean up "dirty" resolved HTML by:
@@ -385,7 +538,13 @@ pub fn interpolate(template: &str, data: &Value) -> String {
                     // $t() but no $i18n data — preserve for runtime resolution
                     result.push_str(&format!("{{{{{}}}}}", expr));
                 } else {
-                    result.push_str(&escape_html(&resolve_path(data, expr)));
+                    let value = resolve_path(data, expr);
+                    if value.contains("{{") {
+                        // Value is an unresolved or compile expression — preserve for Java
+                        result.push_str(&value);
+                    } else {
+                        result.push_str(&escape_html(&value));
+                    }
                 }
                 rest = &after_open[end + 2..];
             } else {
@@ -431,10 +590,22 @@ pub(crate) fn try_resolve_t(expr: &str, data: &Value) -> Option<String> {
 /// Resolve a dot-separated path like `user.name` against a JSON value.
 pub fn resolve_path(data: &Value, path: &str) -> String {
     let mut current = data;
-    for key in path.split('.') {
+    let keys: Vec<&str> = path.split('.').collect();
+    for (i, key) in keys.iter().enumerate() {
         let key = key.trim();
         match current.get(key) {
-            Some(v) => current = v,
+            Some(v) => {
+                // Compile-mode expression forwarding: if value is "{{ expr }}" and there are
+                // remaining path segments, compose "{{ expr.remaining }}" for Java.
+                if let Value::String(s) = v {
+                    if i + 1 < keys.len() && s.starts_with("{{") && s.ends_with("}}") {
+                        let inner = s[2..s.len() - 2].trim();
+                        let remaining = keys[i + 1..].join(".");
+                        return format!("{{{{ {}.{} }}}}", inner, remaining);
+                    }
+                }
+                current = v;
+            }
             None => return format!("{{{{{}}}}}", path),
         }
     }
@@ -602,7 +773,7 @@ mod tests {
     }
 
     #[test]
-    fn test_render_page_basic() {
+    fn test_render_to_string_basic() {
         let resolved = ResolvedComponent {
             html: "<h1>Hello</h1>".to_string(),
             styles: vec!["h1 { color: red; }".to_string()],
@@ -610,7 +781,7 @@ mod tests {
             module_imports: Vec::new(),
         };
         let data = json!({});
-        let html = render_page(&resolved, &data, "Van").unwrap();
+        let html = render_to_string(&resolved, &data, "Van").unwrap();
         assert!(html.contains("<h1>Hello</h1>"));
         assert!(html.contains("h1 { color: red; }"));
         // Should NOT contain client.js WebSocket reload

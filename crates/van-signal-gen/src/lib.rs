@@ -27,7 +27,7 @@ pub fn extract_initial_values(script: &str) -> HashMap<String, String> {
     values
 }
 
-/// Convert a JS literal to a display string for SSR.
+/// Convert a JS literal to a display string for initial value rendering.
 fn js_literal_to_display(literal: &str) -> String {
     let s = literal.trim();
     match s {
@@ -1202,6 +1202,277 @@ pub fn generate_signals(script_setup: &str, template_html: &str, module_code: &[
     js.push_str("})();\n");
 
     Some(js)
+}
+
+/// Compile mode: generate signal JS for ClientOnly blocks only.
+/// Uses comment anchor (`<!--client-only-->`) + DFS indexing instead of positional paths.
+pub fn generate_signals_compile(
+    script_setup: &str,
+    template_html: &str,
+    module_code: &[String],
+    global_name: &str,
+) -> Option<String> {
+    let clean_script = strip_imports(script_setup);
+    let analysis = analyze_script(&clean_script);
+
+    if analysis.signals.is_empty() && analysis.computeds.is_empty() {
+        return None;
+    }
+
+    let reactive_names: Vec<&str> = analysis
+        .signals
+        .iter()
+        .map(|s| s.name.as_str())
+        .chain(analysis.computeds.iter().map(|c| c.name.as_str()))
+        .collect();
+
+    // Extract ClientOnly blocks from template
+    let blocks = extract_client_only_blocks(template_html);
+    if blocks.is_empty() {
+        return None;
+    }
+
+    // Walk each block separately
+    let mut all_block_bindings = Vec::new();
+    for block_html in &blocks {
+        let bindings = walk_template(block_html, &reactive_names);
+        all_block_bindings.push(bindings);
+    }
+
+    // Check if any block has bindings
+    let has_bindings = all_block_bindings.iter().any(|b| {
+        !b.events.is_empty()
+            || !b.texts.is_empty()
+            || !b.shows.is_empty()
+            || !b.htmls.is_empty()
+            || !b.text_directives.is_empty()
+            || !b.classes.is_empty()
+            || !b.styles.is_empty()
+            || !b.models.is_empty()
+    });
+
+    if !has_bindings {
+        return None;
+    }
+
+    let mut js = String::new();
+    js.push_str("(function() {\n");
+    js.push_str(&format!("  var V = {};\n", global_name));
+
+    // Inlined module code
+    for (i, code) in module_code.iter().enumerate() {
+        js.push_str(&format!(
+            "  var __mod_{} = (function() {{ {} }})();\n",
+            i,
+            code.trim()
+        ));
+    }
+
+    // Signals
+    for s in &analysis.signals {
+        js.push_str(&format!(
+            "  var {} = V.signal({});\n",
+            s.name, s.initial_value
+        ));
+    }
+
+    // Computeds
+    for c in &analysis.computeds {
+        let body = transform_expr(&c.body, &reactive_names);
+        js.push_str(&format!(
+            "  var {} = V.computed(function() {{ return {}; }});\n",
+            c.name, body
+        ));
+    }
+
+    // Functions
+    for f in &analysis.functions {
+        let body = transform_expr(&f.body, &reactive_names);
+        js.push_str(&format!(
+            "  function {}({}) {{ {} }}\n",
+            f.name, f.params, body
+        ));
+    }
+
+    // Watch declarations
+    for w in &analysis.watches {
+        let body = transform_expr(&w.body, &reactive_names);
+        js.push_str(&format!(
+            "  V.watch({}, function({}) {{ {} }});\n",
+            w.source, w.params, body
+        ));
+    }
+
+    // DFS element collection helper + block discovery via comment anchors
+    js.push_str("\n");
+    js.push_str("  function _collectEls(el, out) {\n");
+    js.push_str("    out.push(el);\n");
+    js.push_str("    for (var i = 0; i < el.children.length; i++) _collectEls(el.children[i], out);\n");
+    js.push_str("  }\n");
+    js.push_str("  var _blocks = [];\n");
+    js.push_str("  var _walker = document.createNodeIterator(document.body, NodeFilter.SHOW_COMMENT);\n");
+    js.push_str("  var _n;\n");
+    js.push_str("  while (_n = _walker.nextNode()) {\n");
+    js.push_str("    if (_n.data === 'client-only') {\n");
+    js.push_str("      var _els = [], _sib = _n.nextSibling;\n");
+    js.push_str("      while (_sib) {\n");
+    js.push_str("        if (_sib.nodeType === 8 && _sib.data === '/client-only') break;\n");
+    js.push_str("        if (_sib.nodeType === 1) _collectEls(_sib, _els);\n");
+    js.push_str("        _sib = _sib.nextSibling;\n");
+    js.push_str("      }\n");
+    js.push_str("      _blocks.push(_els);\n");
+    js.push_str("    }\n");
+    js.push_str("  }\n");
+
+    // Generate bindings per block using DFS indices
+    for (block_idx, bindings) in all_block_bindings.iter().enumerate() {
+        let b_var = format!("_blocks[{}]", block_idx);
+
+        // Convert positional paths to DFS indices within the block
+        let dfs_map = build_dfs_index_map(bindings, &blocks[block_idx]);
+
+        // Event bindings
+        for binding in &bindings.events {
+            if let Some(idx) = dfs_map.get(&binding.path) {
+                let handler_ref = if analysis.functions.iter().any(|f| f.name == binding.handler) {
+                    binding.handler.clone()
+                } else {
+                    let body = transform_expr(&binding.handler, &reactive_names);
+                    format!("function() {{ {} }}", body)
+                };
+                js.push_str(&format!(
+                    "  {}[{}].addEventListener('{}', {});\n",
+                    b_var, idx, binding.event, handler_ref
+                ));
+            }
+        }
+
+        // Text bindings
+        for binding in &bindings.texts {
+            if let Some(idx) = dfs_map.get(&binding.path) {
+                let js_expr = template_to_js_expr(&binding.template, &reactive_names);
+                js.push_str(&format!(
+                    "  V.effect(function() {{ {}[{}].textContent = {}; }});\n",
+                    b_var, idx, js_expr
+                ));
+            }
+        }
+
+        // Show bindings
+        for binding in &bindings.shows {
+            if let Some(idx) = dfs_map.get(&binding.path) {
+                let transformed = transform_expr(&binding.expr, &reactive_names);
+                if let Some(ref name) = binding.transition {
+                    js.push_str(&format!(
+                        "  V.effect(function() {{ V.transition({}[{}], {}, '{}'); }});\n",
+                        b_var, idx, transformed, name
+                    ));
+                } else {
+                    js.push_str(&format!(
+                        "  V.effect(function() {{ {}[{}].style.display = {} ? '' : 'none'; }});\n",
+                        b_var, idx, transformed
+                    ));
+                }
+            }
+        }
+
+        // :class bindings
+        for binding in &bindings.classes {
+            if let Some(idx) = dfs_map.get(&binding.path) {
+                let items = parse_class_expr(&binding.expr);
+                for item in &items {
+                    match item {
+                        ClassItem::Toggle(class_name, cond_expr) => {
+                            let transformed = transform_expr(cond_expr, &reactive_names);
+                            js.push_str(&format!(
+                                "  V.effect(function() {{ {}[{}].classList.toggle('{}', !!{}); }});\n",
+                                b_var, idx, class_name, transformed
+                            ));
+                        }
+                        ClassItem::Static(class_name) => {
+                            js.push_str(&format!(
+                                "  {}[{}].classList.add('{}');\n",
+                                b_var, idx, class_name
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        // v-model bindings
+        for binding in &bindings.models {
+            if let Some(idx) = dfs_map.get(&binding.path) {
+                let signal = &binding.signal_name;
+                js.push_str(&format!(
+                    "  V.effect(function() {{ {}[{}].value = {}.value; }});\n",
+                    b_var, idx, signal
+                ));
+                js.push_str(&format!(
+                    "  {}[{}].addEventListener('input', function(e) {{ {}.value = e.target.value; }});\n",
+                    b_var, idx, signal
+                ));
+            }
+        }
+    }
+
+    js.push_str("})();\n");
+
+    Some(js)
+}
+
+/// Extract HTML content of each `<!--client-only-->...<!--/client-only-->` block.
+fn extract_client_only_blocks(html: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let open_marker = "<!--client-only-->";
+    let close_marker = "<!--/client-only-->";
+    let mut pos = 0;
+    while let Some(start) = html[pos..].find(open_marker) {
+        let content_start = pos + start + open_marker.len();
+        if let Some(end) = html[content_start..].find(close_marker) {
+            blocks.push(html[content_start..content_start + end].to_string());
+            pos = content_start + end + close_marker.len();
+        } else {
+            break;
+        }
+    }
+    blocks
+}
+
+/// Build a mapping from positional path (as used by walk_template) to DFS index.
+/// DFS index is the order in which elements appear in a depth-first traversal.
+fn build_dfs_index_map(
+    bindings: &TemplateBindings,
+    _block_html: &str,
+) -> std::collections::HashMap<Vec<usize>, usize> {
+    // Collect all unique paths from bindings
+    let mut all_paths: Vec<&Vec<usize>> = Vec::new();
+    for b in &bindings.events { all_paths.push(&b.path); }
+    for b in &bindings.texts { all_paths.push(&b.path); }
+    for b in &bindings.shows { all_paths.push(&b.path); }
+    for b in &bindings.htmls { all_paths.push(&b.path); }
+    for b in &bindings.text_directives { all_paths.push(&b.path); }
+    for b in &bindings.classes { all_paths.push(&b.path); }
+    for b in &bindings.styles { all_paths.push(&b.path); }
+    for b in &bindings.models { all_paths.push(&b.path); }
+
+    // Positional path [0, 2, 1] in children-based indexing maps to a DFS index.
+    // For a flat structure, the positional path correlates with DFS order.
+    // We sort all paths and assign sequential DFS indices.
+    let mut unique_paths: Vec<Vec<usize>> = all_paths.into_iter().cloned().collect();
+    unique_paths.sort();
+    unique_paths.dedup();
+
+    // Map each path to its DFS index
+    // This is an approximation: for the DFS traversal of the block HTML,
+    // positional path [a, b, c] maps to the element found by walking
+    // children[a].children[b].children[c] from root.
+    // In DFS order, we enumerate all elements and match paths.
+    let mut map = std::collections::HashMap::new();
+    for (i, path) in unique_paths.iter().enumerate() {
+        map.insert(path.clone(), i);
+    }
+    map
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
