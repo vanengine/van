@@ -291,6 +291,8 @@ struct HtmlElement {
     tag: String,
     attrs: Vec<(String, String)>,
     children: Vec<HtmlNode>,
+    /// Byte offset of the opening '<' in the source HTML.
+    source_start: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -479,6 +481,7 @@ fn parse_element(html: &str, pos: usize) -> Option<(HtmlElement, usize)> {
                 tag: tag_name,
                 attrs,
                 children: Vec::new(),
+                source_start: pos,
             },
             after_open,
         ));
@@ -494,6 +497,7 @@ fn parse_element(html: &str, pos: usize) -> Option<(HtmlElement, usize)> {
             tag: tag_name,
             attrs,
             children: child_nodes,
+            source_start: pos,
         },
         end_pos,
     ))
@@ -1621,70 +1625,51 @@ fn collect_binding_paths(bindings: &TemplateBindings) -> Vec<Vec<usize>> {
     paths.into_iter().collect()
 }
 
-/// Walk the HTML element tree and find the byte offset (position of '<') for
-/// each element matching a target path.
+/// Walk the parsed HTML tree to find byte offsets of elements at target paths.
+/// Uses the `source_start` field recorded during parsing.
 fn find_element_offsets(html: &str, target_paths: &[Vec<usize>]) -> HashMap<Vec<usize>, usize> {
     let target_set: std::collections::HashSet<Vec<usize>> = target_paths.iter().cloned().collect();
+    let nodes = parse_html(html);
+
     let mut offsets = HashMap::new();
-    find_offsets_walk(html, 0, &[], &target_set, &mut offsets);
+
+    // Check for <body> — paths are relative to body's children (same as walk_template)
+    if let Some(body) = find_body(&nodes) {
+        collect_offsets_from_tree(&body.children, &[], &target_set, &mut offsets);
+    } else {
+        collect_offsets_from_tree(&nodes, &[], &target_set, &mut offsets);
+    }
+
     offsets
 }
 
-/// Recursive walker that tracks byte position and element path simultaneously.
-fn find_offsets_walk(
-    html: &str,
-    start: usize,
+/// Recursively collect source offsets from the parsed tree, matching target paths.
+fn collect_offsets_from_tree(
+    children: &[HtmlNode],
     parent_path: &[usize],
     targets: &std::collections::HashSet<Vec<usize>>,
     offsets: &mut HashMap<Vec<usize>, usize>,
 ) {
-    let bytes = html.as_bytes();
-    let mut pos = start;
     let mut element_index: usize = 0;
-
-    while pos < bytes.len() {
-        if bytes[pos] == b'<' {
-            // Skip comments/doctype
-            if pos + 1 < bytes.len() && bytes[pos + 1] == b'!' {
-                if let Some(end) = html[pos..].find('>') {
-                    pos = pos + end + 1;
-                } else {
-                    break;
-                }
+    for node in children {
+        if let HtmlNode::Element(elem) = node {
+            // Skip <transition> — not a real DOM element
+            if elem.tag == "transition" {
+                collect_offsets_from_tree(&elem.children, parent_path, targets, offsets);
                 continue;
             }
-            // Skip closing tags
-            if pos + 1 < bytes.len() && bytes[pos + 1] == b'/' {
-                // Hit a closing tag — we're done at this level
-                break;
+
+            let mut current_path = parent_path.to_vec();
+            current_path.push(element_index);
+
+            if targets.contains(&current_path) {
+                offsets.insert(current_path.clone(), elem.source_start);
             }
-            // Opening tag
-            if let Some((elem, end_pos)) = parse_element(html, pos) {
-                let mut current_path = parent_path.to_vec();
-                current_path.push(element_index);
 
-                if targets.contains(&current_path) {
-                    offsets.insert(current_path.clone(), pos);
-                }
+            // Recurse into children
+            collect_offsets_from_tree(&elem.children, &current_path, targets, offsets);
 
-                // Skip <transition> (not a real DOM element)
-                if elem.tag == "transition" {
-                    // Recurse into children with same element_index counter
-                    let gt = html[pos..].find('>').unwrap_or(0) + pos + 1;
-                    find_offsets_walk(html, gt, parent_path, targets, offsets);
-                } else {
-                    // Recurse into children
-                    let gt = html[pos..].find('>').unwrap_or(0) + pos + 1;
-                    find_offsets_walk(html, gt, &current_path, targets, offsets);
-                    element_index += 1;
-                }
-
-                pos = end_pos;
-            } else {
-                pos += 1;
-            }
-        } else {
-            pos += 1;
+            element_index += 1;
         }
     }
 }
