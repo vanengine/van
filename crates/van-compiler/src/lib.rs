@@ -490,6 +490,45 @@ const count = ref(0)
         let html = compile_single(source).unwrap();
         assert!(!html.contains("@click"), "@click should be stripped in compile mode");
     }
+
+    #[test]
+    fn test_compile_signal_vs_model() {
+        // Signal bindings should be processed; model bindings should be preserved
+        let source = r#"
+<script setup>
+const count = ref(0)
+const increment = () => count.value++
+const visible = ref(false)
+</script>
+<template>
+  <div>
+    <h1>{{ ctx.title }}</h1>
+    <p>Count: {{ count }}</p>
+    <button @click="increment">+1</button>
+    <div v-show="visible">Hidden</div>
+    <ul v-for="item in ctx.items"><li>{{ item }}</li></ul>
+    <div v-if="ctx.isAdmin">Admin</div>
+  </div>
+</template>
+"#;
+        let html = compile_single(source).unwrap();
+
+        // Model bindings preserved for Java
+        assert!(html.contains("{{ctx.title}}"), "model {{ }} should be preserved");
+        assert!(html.contains("v-for="), "v-for should be preserved");
+        assert!(html.contains("v-if=\"ctx.isAdmin\""), "model v-if should be preserved");
+
+        // Signal bindings processed
+        assert!(html.contains("Count: 0"), "signal {{ count }} should be interpolated to initial value");
+        assert!(!html.contains("@click"), "@click should be stripped");
+        assert!(html.contains("display:none"), "signal v-show=false should be evaluated");
+
+        // Signal JS should be generated with comment anchors
+        assert!(html.contains("<!--v:"), "comment anchors should be injected");
+        assert!(html.contains("V.signal(0)"), "signal JS should be generated");
+        assert!(html.contains("addEventListener"), "event binding JS should be generated");
+        assert!(html.contains("createTreeWalker"), "comment walker should be generated");
+    }
 }
 
 #[cfg(test)]

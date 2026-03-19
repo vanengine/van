@@ -31,10 +31,12 @@ pub fn run() -> Result<()> {
             .unwrap_or(entry);
 
         let page_key = format!("pages/{}", stem);
-        let page_data = all_data
-            .get(&page_key)
-            .cloned()
-            .unwrap_or(serde_json::json!({}));
+        let page_data = if let Some(pd) = all_data.get(&page_key) {
+            pd.clone()
+        } else {
+            // Fallback: use the entire data object (same as load_data())
+            all_data.clone()
+        };
         let data_json = serde_json::to_string(&page_data)?;
 
         let html = van_compiler::render_to_string(entry, &files, &data_json)

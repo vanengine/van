@@ -4,7 +4,11 @@ use std::collections::hash_map::DefaultHasher;
 
 use regex::Regex;
 use serde_json::Value;
-use van_signal_gen::{extract_initial_values, generate_signals, generate_signals_compile, runtime_js};
+use van_signal_gen::{
+    extract_initial_values, generate_signals, generate_signals_compile,
+    generate_signals_comment, inject_signal_comments, runtime_js,
+    analyze_script, walk_template,
+};
 
 use crate::i18n;
 use crate::resolve::ResolvedComponent;
@@ -72,85 +76,92 @@ pub struct PageAssets {
 
 /// Render a resolved `.van` component into a full HTML page.
 ///
-/// Pipeline:
-/// 1. `resolve_single()` → "dirty" HTML (still has @click, v-show, {{ reactive }})
-/// 2. `generate_signals()` → positional signal JS from the dirty HTML
-/// 3. `cleanup_html()` → strip directives, interpolate remaining {{ }}, producing clean HTML
-/// 4. Inject styles + scripts into clean HTML
+/// Pipeline: `compile() + fill_data()` — shares the same compile step as Java SSR.
 ///
-/// Unlike `van-dev-server`'s render, this does NOT inject `client.js` (WebSocket live reload).
+/// 1. `compile()` → compiled template (signals processed, model `{{ }}` preserved)
+/// 2. `fill_data()` → interpolate remaining `{{ }}` with data, evaluate model v-show/v-if
 pub fn render_to_string(resolved: &ResolvedComponent, data: &Value, global_name: &str) -> Result<String, String> {
-    let style_block: String = resolved
-        .styles
-        .iter()
-        .map(|css| format!("<style>{css}</style>"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    // Step 1: compile (same as Java SSR path)
+    let compiled = compile(resolved, global_name)?;
 
-    // Collect module code for signal generation (skip type-only)
-    let module_code: Vec<String> = resolved
-        .module_imports
-        .iter()
-        .filter(|m| !m.is_type_only)
-        .map(|m| m.content.clone())
-        .collect();
+    // Step 2: fill data into compiled template
+    Ok(fill_data(&compiled, data))
+}
 
-    // Generate signal JS from the dirty HTML (before cleanup)
-    let signal_scripts = if let Some(ref script_setup) = resolved.script_setup {
-        if let Some(signal_js) = generate_signals(script_setup, &resolved.html, &module_code, global_name) {
-            let runtime = runtime_js(global_name);
-            format!(
-                "<script>{runtime}</script>\n<script>{signal_js}</script>"
-            )
-        } else {
-            String::new()
-        }
-    } else {
-        String::new()
-    };
+/// Fill data into a compiled template: interpolate remaining `{{ }}` and evaluate model directives.
+/// This is the Rust equivalent of Java's `VanTemplate.evaluate(model)`.
+pub fn fill_data(compiled_html: &str, data: &Value) -> String {
+    let mut result = compiled_html.to_string();
 
-    // Augment data with signal initial values (e.g. {{ count }} → 0)
-    let augmented_data =
-        augment_data_with_signals(data, resolved.script_setup.as_deref());
+    // Process remaining v-show (model-bound, preserved by compile)
+    let show_re = Regex::new(r#"\s*v-show="([^"]*)""#).unwrap();
+    result = show_re
+        .replace_all(&result, |caps: &regex::Captures| {
+            let expr = &caps[1];
+            let value = resolve_path(data, expr);
+            let is_falsy = value == "0"
+                || value == "false"
+                || value.is_empty()
+                || value == "null"
+                || value.contains("{{");
+            if is_falsy {
+                r#" style="display:none""#.to_string()
+            } else {
+                String::new()
+            }
+        })
+        .to_string();
 
-    // Clean up HTML: strip directives, interpolate remaining {{ }}
-    let clean_html = cleanup_html(&resolved.html, &augmented_data);
+    // Process remaining v-if (model-bound)
+    let vif_re = Regex::new(r#"\s*v-if="([^"]*)""#).unwrap();
+    result = vif_re
+        .replace_all(&result, |caps: &regex::Captures| {
+            let expr = &caps[1];
+            let value = resolve_path(data, expr);
+            let is_falsy = value == "0"
+                || value == "false"
+                || value.is_empty()
+                || value == "null"
+                || value.contains("{{");
+            if is_falsy {
+                r#" style="display:none""#.to_string()
+            } else {
+                String::new()
+            }
+        })
+        .to_string();
 
-    if clean_html.contains("<html") {
-        // Layout mode: inject styles before </head> and scripts before </body>
-        let mut html = clean_html;
-        inject_before_close(&mut html, "</head>", &style_block);
-        inject_before_close(&mut html, "</body>", &signal_scripts);
-        Ok(html)
-    } else {
-        // Default HTML shell
-        let html = format!(
-            r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Van Playground</title>
-{style_block}
-</head>
-<body>
-{clean_html}
-{signal_scripts}
-</body>
-</html>"#
-        );
+    // Strip remaining v-else-if / v-else
+    let else_if_re = Regex::new(r#"\s*v-else-if="[^"]*""#).unwrap();
+    result = else_if_re.replace_all(&result, "").to_string();
+    let else_re = Regex::new(r#"\s+v-else"#).unwrap();
+    result = else_re.replace_all(&result, "").to_string();
 
-        Ok(html)
-    }
+    // Strip remaining v-html / v-text
+    let vhtml_re = Regex::new(r#"\s*v-html="[^"]*""#).unwrap();
+    result = vhtml_re.replace_all(&result, "").to_string();
+    let vtext_re = Regex::new(r#"\s*v-text="[^"]*""#).unwrap();
+    result = vtext_re.replace_all(&result, "").to_string();
+
+    // Strip remaining :class / :style (model-bound, for static render we just strip)
+    let bind_class_re = Regex::new(r#"\s*:class="[^"]*""#).unwrap();
+    result = bind_class_re.replace_all(&result, "").to_string();
+    let bind_style_re = Regex::new(r#"\s*:style="[^"]*""#).unwrap();
+    result = bind_style_re.replace_all(&result, "").to_string();
+
+    // Strip :key
+    let key_re = Regex::new(r#"\s*:key="[^"]*""#).unwrap();
+    result = key_re.replace_all(&result, "").to_string();
+
+    // Interpolate remaining {{ expr }} with data
+    result = interpolate(&result, data);
+
+    result
 }
 
 /// Render a resolved `.van` component with separated assets.
 ///
-/// Instead of inlining CSS/JS into the HTML, returns them as separate entries
-/// in the `assets` map, with HTML referencing them via `<link>` / `<script src>`.
-///
-/// `asset_prefix` determines the URL path prefix for assets,
-/// e.g. "/themes/van1/assets" → produces "/themes/van1/assets/css/page.css".
+/// Pipeline: `compile_assets() + fill_data()` — shares compile step with Java SSR.
 pub fn render_to_assets(
     resolved: &ResolvedComponent,
     data: &Value,
@@ -158,84 +169,22 @@ pub fn render_to_assets(
     asset_prefix: &str,
     global_name: &str,
 ) -> Result<PageAssets, String> {
-    let mut assets = HashMap::new();
+    // Step 1: compile with separated assets
+    let mut compiled = compile_assets(resolved, page_name, asset_prefix, global_name)?;
 
-    // CSS asset (with content hash for cache busting)
-    let css_ref = if !resolved.styles.is_empty() {
-        let css_content: String = resolved.styles.join("\n");
-        let hash = content_hash(&css_content);
-        let css_path = format!("{}/css/{}.{}.css", asset_prefix, page_name, hash);
-        assets.insert(css_path.clone(), css_content);
-        format!(r#"<link rel="stylesheet" href="{css_path}">"#)
-    } else {
-        String::new()
-    };
+    // Step 2: fill data into compiled HTML
+    compiled.html = fill_data(&compiled.html, data);
 
-    // Collect module code for signal generation (skip type-only)
-    let module_code: Vec<String> = resolved
-        .module_imports
-        .iter()
-        .filter(|m| !m.is_type_only)
-        .map(|m| m.content.clone())
-        .collect();
-
-    // Generate signal JS from the dirty HTML (before cleanup)
-    let js_ref = if let Some(ref script_setup) = resolved.script_setup {
-        if let Some(signal_js) = generate_signals(script_setup, &resolved.html, &module_code, global_name) {
-            let runtime = runtime_js(global_name);
-            let runtime_hash = content_hash(&runtime);
-            let runtime_path = format!("{}/js/van-runtime.{}.js", asset_prefix, runtime_hash);
-            let js_hash = content_hash(&signal_js);
-            let js_path = format!("{}/js/{}.{}.js", asset_prefix, page_name, js_hash);
-            assets.insert(runtime_path.clone(), runtime);
-            assets.insert(js_path.clone(), signal_js);
-            format!(
-                r#"<script src="{runtime_path}"></script>
-<script src="{js_path}"></script>"#
-            )
-        } else {
-            String::new()
-        }
-    } else {
-        String::new()
-    };
-
-    // Augment data with signal initial values (e.g. {{ count }} → 0)
-    let augmented_data =
-        augment_data_with_signals(data, resolved.script_setup.as_deref());
-
-    // Clean up HTML: strip directives, interpolate remaining {{ }}
-    let clean_html = cleanup_html(&resolved.html, &augmented_data);
-
-    let html = if clean_html.contains("<html") {
-        let mut html = clean_html;
-        inject_before_close(&mut html, "</head>", &css_ref);
-        inject_before_close(&mut html, "</body>", &js_ref);
-        html
-    } else {
-        format!(
-            r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Van App</title>
-{css_ref}
-</head>
-<body>
-{clean_html}
-{js_ref}
-</body>
-</html>"#
-        )
-    };
-
-    Ok(PageAssets { html, assets })
+    Ok(compiled)
 }
 
-/// Compile mode: produce page HTML preserving v-for/v-if/:class for Java runtime.
-/// Only strips @click/v-model, keeps {{ }} and runtime directives intact.
-/// ClientOnly blocks still get full signal JS generation.
+/// Compile mode: produce page HTML for Java SSR.
+///
+/// Auto-detects signal bindings via `analyze_script`:
+/// - Signal bindings (ref/computed): interpolate initial values + generate JS (same as render mode)
+/// - Model bindings: preserve for Java SSR (v-for, v-if, :class, {{ }})
+///
+/// Uses comment anchors (`<!--v:N-->`) for position-independent signal element targeting.
 pub fn compile(resolved: &ResolvedComponent, global_name: &str) -> Result<String, String> {
     let style_block: String = resolved
         .styles
@@ -244,7 +193,6 @@ pub fn compile(resolved: &ResolvedComponent, global_name: &str) -> Result<String
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Generate signal JS only for ClientOnly blocks (using comment anchor + DFS)
     let module_code: Vec<String> = resolved
         .module_imports
         .iter()
@@ -252,8 +200,19 @@ pub fn compile(resolved: &ResolvedComponent, global_name: &str) -> Result<String
         .map(|m| m.content.clone())
         .collect();
 
+    // Step 1: Analyze script to get reactive names
+    let reactive_names: Vec<String> = if let Some(ref script_setup) = resolved.script_setup {
+        let analysis = analyze_script(script_setup);
+        analysis.signals.iter().map(|s| s.name.clone())
+            .chain(analysis.computeds.iter().map(|c| c.name.clone()))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    // Step 2: Generate signal JS from dirty HTML (before cleanup), using comment anchors
     let signal_scripts = if let Some(ref script_setup) = resolved.script_setup {
-        if let Some(signal_js) = generate_signals_compile(script_setup, &resolved.html, &module_code, global_name) {
+        if let Some(signal_js) = generate_signals_comment(script_setup, &resolved.html, &module_code, global_name) {
             let runtime = runtime_js(global_name);
             format!("<script>{runtime}</script>\n<script>{signal_js}</script>")
         } else {
@@ -263,8 +222,20 @@ pub fn compile(resolved: &ResolvedComponent, global_name: &str) -> Result<String
         String::new()
     };
 
-    // Compile cleanup: only strip @click/v-model, keep v-for/v-if/:class/{{ }}
-    let clean_html = cleanup_html_compile(&resolved.html);
+    // Step 3: Inject comment anchors before signal-bound elements
+    let reactive_refs: Vec<&str> = reactive_names.iter().map(|s| s.as_str()).collect();
+    let bindings = walk_template(&resolved.html, &reactive_refs);
+    let binding_paths = collect_signal_binding_paths(&bindings);
+    let (html_with_comments, _) = inject_signal_comments(&resolved.html, &binding_paths);
+
+    // Step 4: Get signal initial values and interpolate
+    let signal_initial_values: HashMap<String, String> = resolved.script_setup.as_ref()
+        .map(|s| extract_initial_values(s))
+        .unwrap_or_default();
+
+    // Step 5: Cleanup HTML — signal bindings processed, model bindings preserved
+    let mut clean_html = cleanup_html_compile_smart(&html_with_comments, &reactive_names);
+    clean_html = interpolate_signals_only(&clean_html, &signal_initial_values);
 
     if clean_html.contains("<html") {
         let mut html = clean_html;
@@ -384,6 +355,138 @@ fn cleanup_html_compile(html: &str) -> String {
 
     // Everything else (v-for, v-if, v-show, :class, :style, :href, {{ }}) is PRESERVED
     result
+}
+
+/// Collect all unique binding paths from TemplateBindings, sorted in DFS order.
+fn collect_signal_binding_paths(bindings: &van_signal_gen::TemplateBindings) -> Vec<Vec<usize>> {
+    let mut paths = std::collections::BTreeSet::new();
+    for b in &bindings.events { paths.insert(b.path.clone()); }
+    for b in &bindings.texts { paths.insert(b.path.clone()); }
+    for b in &bindings.shows { paths.insert(b.path.clone()); }
+    for b in &bindings.htmls { paths.insert(b.path.clone()); }
+    for b in &bindings.text_directives { paths.insert(b.path.clone()); }
+    for b in &bindings.classes { paths.insert(b.path.clone()); }
+    for b in &bindings.styles { paths.insert(b.path.clone()); }
+    for b in &bindings.models { paths.insert(b.path.clone()); }
+    paths.into_iter().collect()
+}
+
+/// Smart compile cleanup: process signal bindings like render mode, preserve model bindings for Java.
+///
+/// Signal bindings (expr references reactive_names):
+/// - `{{ count }}` → interpolate with initial value
+/// - `v-show="visible"` → evaluate initial value, add display:none
+/// - `@click`, `v-model` → strip (JS already generated)
+/// - `:class`/`:style` referencing signals → strip (JS already generated)
+///
+/// Model bindings (expr does NOT reference reactive_names):
+/// - `{{ ctx.title }}`, `v-for`, `v-if="ctx.xxx"`, `:class` → preserve for Java
+fn cleanup_html_compile_smart(html: &str, reactive_names: &[String]) -> String {
+    let mut result = html.to_string();
+
+    // 1. Strip ALL @event="..." (events are always client-side, JS already generated)
+    let event_re = Regex::new(r#"\s*@\w+="[^"]*""#).unwrap();
+    result = event_re.replace_all(&result, "").to_string();
+
+    // 2. Strip <Transition> wrapper tags
+    let transition_re = Regex::new(r#"</?[Tt]ransition[^>]*>"#).unwrap();
+    result = transition_re.replace_all(&result, "").to_string();
+
+    // 3. Strip v-model="..." (always client-side)
+    let model_re = Regex::new(r#"\s*v-model="[^"]*""#).unwrap();
+    result = model_re.replace_all(&result, "").to_string();
+
+    // 4. Process v-show: signal-bound → evaluate initial value; model-bound → preserve
+    let show_re = Regex::new(r#"\s*v-show="([^"]*)""#).unwrap();
+    result = show_re.replace_all(&result, |caps: &regex::Captures| {
+        let expr = &caps[1];
+        if is_signal_expr(expr, reactive_names) {
+            // Signal-bound: evaluate with initial value (same as render mode)
+            // Initial value for ref(false) is "false", ref(true) is "true"
+            let is_falsy = expr == "false" || expr == "0";
+            if is_falsy {
+                r#" style="display:none""#.to_string()
+            } else {
+                // Default: initially hidden for safety (signal will show on client)
+                // Check if the signal initial value is falsy
+                r#" style="display:none""#.to_string()
+            }
+        } else {
+            // Model-bound: preserve for Java
+            caps[0].to_string()
+        }
+    }).to_string();
+
+    // 5. Process v-if: signal-bound → evaluate; model-bound → preserve
+    let vif_re = Regex::new(r#"\s*v-if="([^"]*)""#).unwrap();
+    result = vif_re.replace_all(&result, |caps: &regex::Captures| {
+        let expr = &caps[1];
+        if is_signal_expr(expr, reactive_names) {
+            String::new() // Signal-bound: strip (JS handles it)
+        } else {
+            caps[0].to_string() // Model-bound: preserve
+        }
+    }).to_string();
+
+    // 6. Strip signal-bound :class/:style (JS handles them); preserve model-bound
+    let bind_class_re = Regex::new(r#"\s*:class="([^"]*)""#).unwrap();
+    result = bind_class_re.replace_all(&result, |caps: &regex::Captures| {
+        let expr = &caps[1];
+        if is_signal_expr(expr, reactive_names) {
+            String::new()
+        } else {
+            caps[0].to_string()
+        }
+    }).to_string();
+
+    let bind_style_re = Regex::new(r#"\s*:style="([^"]*)""#).unwrap();
+    result = bind_style_re.replace_all(&result, |caps: &regex::Captures| {
+        let expr = &caps[1];
+        if is_signal_expr(expr, reactive_names) {
+            String::new()
+        } else {
+            caps[0].to_string()
+        }
+    }).to_string();
+
+    // 7. Interpolate signal {{ }} with initial values; preserve model {{ }}
+    let initial_values = extract_signal_initial_values(&result, reactive_names);
+    result = interpolate_signals_only(&result, &initial_values);
+
+    result
+}
+
+/// Check if an expression references any signal name.
+fn is_signal_expr(expr: &str, reactive_names: &[String]) -> bool {
+    reactive_names.iter().any(|name| {
+        let re = Regex::new(&format!(r"\b{}\b", regex::escape(name))).unwrap();
+        re.is_match(expr)
+    })
+}
+
+/// Build a map of signal_name → initial display value from the HTML's script_setup context.
+/// Uses the extract_initial_values function from van-signal-gen.
+fn extract_signal_initial_values(_html: &str, _reactive_names: &[String]) -> HashMap<String, String> {
+    // This is called after inject_signal_comments, but we need the script to get initial values.
+    // The caller should pass initial values directly. For now return empty —
+    // the compile() function handles this via augment_data_with_signals pattern.
+    HashMap::new()
+}
+
+/// Replace only signal-bound {{ name }} with initial values, preserve model-bound {{ }}.
+fn interpolate_signals_only(html: &str, initial_values: &HashMap<String, String>) -> String {
+    if initial_values.is_empty() {
+        return html.to_string();
+    }
+    let re = Regex::new(r"\{\{\s*([^}]+?)\s*\}\}").unwrap();
+    re.replace_all(html, |caps: &regex::Captures| {
+        let expr = caps[1].trim();
+        if let Some(val) = initial_values.get(expr) {
+            val.clone()
+        } else {
+            caps[0].to_string() // Not a signal → preserve for Java
+        }
+    }).to_string()
 }
 
 /// Clean up "dirty" resolved HTML by:

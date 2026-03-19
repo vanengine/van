@@ -37,6 +37,12 @@ anyhow = "1"
 
 # Utilities
 regex = "1.12"
+
+# JS AST parsing (for script setup analysis)
+oxc_allocator = "0.120"
+oxc_parser = "0.120"
+oxc_ast = "0.120"
+oxc_span = "0.120"
 wasm-bindgen = "0.2"
 
 # CLI

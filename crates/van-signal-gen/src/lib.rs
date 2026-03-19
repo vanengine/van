@@ -1,5 +1,9 @@
 use std::collections::HashMap;
 use regex::Regex;
+use oxc_allocator::Allocator;
+use oxc_ast::ast::*;
+use oxc_parser::Parser;
+use oxc_span::{GetSpan, SourceType};
 
 /// The embedded signal runtime JS (~1KB) with `__VAN_NS__` placeholder.
 pub const RUNTIME_JS: &str = include_str!("runtime.js");
@@ -72,73 +76,207 @@ pub struct ScriptAnalysis {
     pub watches: Vec<WatchDecl>,
 }
 
-/// Parse `<script setup>` content to extract reactive declarations.
+/// Get the name of a call expression's callee (if it's a simple identifier).
+fn callee_name<'a>(call: &CallExpression<'a>) -> Option<&'a str> {
+    if let Expression::Identifier(id) = &call.callee {
+        Some(id.name.as_str())
+    } else {
+        None
+    }
+}
+
+/// Extract the binding name from a VariableDeclarator (only simple identifiers).
+fn binding_name(declarator: &VariableDeclarator) -> Option<String> {
+    if let BindingPattern::BindingIdentifier(id) = &declarator.id {
+        Some(id.name.to_string())
+    } else {
+        None
+    }
+}
+
+/// Extract the text of formal parameters (without parentheses).
+fn params_text(params: &FormalParameters, source: &str) -> String {
+    let text = params.span.source_text(source);
+    text.trim_start_matches('(').trim_end_matches(')').trim().to_string()
+}
+
+/// Extract the inner body text of a FunctionBody (without outer braces).
+fn body_inner_text(body: &FunctionBody, source: &str) -> String {
+    let text = body.span.source_text(source);
+    let trimmed = text.trim();
+    if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        trimmed[1..trimmed.len() - 1].trim().to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Extract the body of a computed()'s callback argument.
+/// For `computed(() => expr)`, returns "expr".
+/// For `computed(() => { return expr; })`, returns the block inner text.
+fn extract_computed_body(call: &CallExpression, source: &str) -> String {
+    let Some(first_arg) = call.arguments.first() else {
+        return String::new();
+    };
+    match first_arg {
+        Argument::ArrowFunctionExpression(arrow) => {
+            if arrow.expression {
+                // Concise body: () => expr — get the expression text
+                if let Some(stmt) = arrow.body.statements.first() {
+                    if let Statement::ExpressionStatement(expr_stmt) = stmt {
+                        return expr_stmt.expression.span().source_text(source).trim().to_string();
+                    }
+                }
+                body_inner_text(&arrow.body, source)
+            } else {
+                body_inner_text(&arrow.body, source)
+            }
+        }
+        Argument::FunctionExpression(func) => {
+            if let Some(ref body) = func.body {
+                body_inner_text(body, source)
+            } else {
+                String::new()
+            }
+        }
+        _ => String::new(),
+    }
+}
+
+/// Extract watch() arguments: (source_name, callback_params, callback_body).
+fn extract_watch_args(call: &CallExpression, source: &str) -> Option<(String, String, String)> {
+    if call.arguments.len() < 2 {
+        return None;
+    }
+    // First arg: source signal name
+    let source_name = match &call.arguments[0] {
+        Argument::Identifier(id) => id.name.to_string(),
+        _ => return None,
+    };
+    // Second arg: callback (arrow or function)
+    let (params, body) = match &call.arguments[1] {
+        Argument::ArrowFunctionExpression(arrow) => {
+            let p = params_text(&arrow.params, source);
+            let b = if arrow.expression {
+                if let Some(stmt) = arrow.body.statements.first() {
+                    if let Statement::ExpressionStatement(es) = stmt {
+                        es.expression.span().source_text(source).trim().to_string()
+                    } else {
+                        body_inner_text(&arrow.body, source)
+                    }
+                } else {
+                    body_inner_text(&arrow.body, source)
+                }
+            } else {
+                body_inner_text(&arrow.body, source)
+            };
+            (p, b)
+        }
+        Argument::FunctionExpression(func) => {
+            let p = params_text(&func.params, source);
+            let b = func.body.as_ref().map(|b| body_inner_text(b, source)).unwrap_or_default();
+            (p, b)
+        }
+        _ => return None,
+    };
+    Some((source_name, params, body))
+}
+
+/// Parse `<script setup>` content to extract reactive declarations using oxc AST.
 pub fn analyze_script(script: &str) -> ScriptAnalysis {
+    let allocator = Allocator::default();
+    // Use TypeScript module source type — <script setup> may contain TS syntax (import type, etc.)
+    let source_type = SourceType::from_path("script.ts").unwrap_or_default();
+    let ret = Parser::new(&allocator, script, source_type).parse();
+
     let mut signals = Vec::new();
     let mut computeds = Vec::new();
     let mut functions = Vec::new();
-
-    // Match: const x = ref(value)
-    let ref_re = Regex::new(r#"(?m)const\s+(\w+)\s*=\s*ref\(([^)]*)\)"#).unwrap();
-    for cap in ref_re.captures_iter(script) {
-        signals.push(SignalDecl {
-            name: cap[1].to_string(),
-            initial_value: cap[2].trim().to_string(),
-        });
-    }
-
-    // Match: const x = computed(() => expr)
-    let computed_re =
-        Regex::new(r#"(?m)const\s+(\w+)\s*=\s*computed\(\s*\(\)\s*=>\s*(.+?)\s*\)"#).unwrap();
-    for cap in computed_re.captures_iter(script) {
-        computeds.push(ComputedDecl {
-            name: cap[1].to_string(),
-            body: cap[2].trim().to_string(),
-        });
-    }
-
-    // Match: function name(args) { body }
-    let func_re =
-        Regex::new(r#"(?m)function\s+(\w+)\s*\(([^)]*)\)\s*\{([^}]*)\}"#).unwrap();
-    for cap in func_re.captures_iter(script) {
-        functions.push(FunctionDecl {
-            name: cap[1].to_string(),
-            params: cap[2].trim().to_string(),
-            body: cap[3].trim().to_string(),
-        });
-    }
-
-    // Match: watch(source, function(params) { body }) or watch(source, (params) => { body })
     let mut watches = Vec::new();
-    let watch_fn_re = Regex::new(
-        r#"(?m)watch\(\s*(\w+)\s*,\s*function\s*\(([^)]*)\)\s*\{([^}]*)\}\s*\)"#,
-    )
-    .unwrap();
-    for cap in watch_fn_re.captures_iter(script) {
-        watches.push(WatchDecl {
-            source: cap[1].to_string(),
-            params: cap[2].trim().to_string(),
-            body: cap[3].trim().to_string(),
-        });
-    }
-    let watch_arrow_re = Regex::new(
-        r#"(?m)watch\(\s*(\w+)\s*,\s*\(([^)]*)\)\s*=>\s*\{([^}]*)\}\s*\)"#,
-    )
-    .unwrap();
-    for cap in watch_arrow_re.captures_iter(script) {
-        watches.push(WatchDecl {
-            source: cap[1].to_string(),
-            params: cap[2].trim().to_string(),
-            body: cap[3].trim().to_string(),
-        });
+
+    for stmt in &ret.program.body {
+        match stmt {
+            // const x = ref(...) / computed(...) / () => ... / function() { ... }
+            Statement::VariableDeclaration(decl) => {
+                for declarator in &decl.declarations {
+                    let Some(name) = binding_name(declarator) else { continue };
+                    let Some(ref init) = declarator.init else { continue };
+                    match init {
+                        Expression::CallExpression(call) => {
+                            match callee_name(call) {
+                                Some("ref") => {
+                                    let initial = call.arguments.first()
+                                        .map(|arg| arg.span().source_text(script).trim().to_string())
+                                        .unwrap_or_default();
+                                    signals.push(SignalDecl { name, initial_value: initial });
+                                }
+                                Some("computed") => {
+                                    let body = extract_computed_body(call, script);
+                                    computeds.push(ComputedDecl { name, body });
+                                }
+                                _ => {}
+                            }
+                        }
+                        Expression::ArrowFunctionExpression(arrow) => {
+                            let params = params_text(&arrow.params, script);
+                            let body = if arrow.expression {
+                                // Concise body: () => expr
+                                if let Some(stmt) = arrow.body.statements.first() {
+                                    if let Statement::ExpressionStatement(es) = stmt {
+                                        es.expression.span().source_text(script).trim().to_string()
+                                    } else {
+                                        body_inner_text(&arrow.body, script)
+                                    }
+                                } else {
+                                    body_inner_text(&arrow.body, script)
+                                }
+                            } else {
+                                // Block body: () => { ... }
+                                body_inner_text(&arrow.body, script)
+                            };
+                            functions.push(FunctionDecl { name, params, body });
+                        }
+                        Expression::FunctionExpression(func) => {
+                            let params = params_text(&func.params, script);
+                            let body = func.body.as_ref()
+                                .map(|b| body_inner_text(b, script))
+                                .unwrap_or_default();
+                            functions.push(FunctionDecl { name, params, body });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // function name() { ... }
+            Statement::FunctionDeclaration(func) => {
+                if let Some(ref id) = func.id {
+                    let name = id.name.to_string();
+                    let params = params_text(&func.params, script);
+                    let body = func.body.as_ref()
+                        .map(|b| body_inner_text(b, script))
+                        .unwrap_or_default();
+                    functions.push(FunctionDecl { name, params, body });
+                }
+            }
+            // watch(source, callback)
+            Statement::ExpressionStatement(expr_stmt) => {
+                if let Expression::CallExpression(call) = &expr_stmt.expression {
+                    if callee_name(call) == Some("watch") {
+                        if let Some((source_name, params, body)) = extract_watch_args(call, script) {
+                            watches.push(WatchDecl {
+                                source: source_name,
+                                params,
+                                body,
+                            });
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
-    ScriptAnalysis {
-        signals,
-        computeds,
-        functions,
-        watches,
-    }
+    ScriptAnalysis { signals, computeds, functions, watches }
 }
 
 // ── Stage B: HTML Tree Walker ───────────────────────────────────────────────
@@ -976,19 +1114,12 @@ fn collect_required_paths(bindings: &TemplateBindings) -> Vec<Vec<usize>> {
     paths.into_iter().collect()
 }
 
-/// Strip import lines from script setup so they don't interfere with regex matching.
-fn strip_imports(script: &str) -> String {
-    let import_re = Regex::new(r#"(?m)^[ \t]*import\s+.*$"#).unwrap();
-    import_re.replace_all(script, "").to_string()
-}
-
 /// Generate the signal JS for a page. Returns `None` if no reactive code found.
 ///
 /// `module_code` contains resolved .ts/.js content (already transpiled to JS) to be
 /// inlined before signal declarations. Each entry is wrapped in an IIFE.
 pub fn generate_signals(script_setup: &str, template_html: &str, module_code: &[String], global_name: &str) -> Option<String> {
-    let clean_script = strip_imports(script_setup);
-    let analysis = analyze_script(&clean_script);
+    let analysis = analyze_script(script_setup);
 
     // If nothing reactive, skip
     if analysis.signals.is_empty() && analysis.computeds.is_empty() {
@@ -1212,8 +1343,7 @@ pub fn generate_signals_compile(
     module_code: &[String],
     global_name: &str,
 ) -> Option<String> {
-    let clean_script = strip_imports(script_setup);
-    let analysis = analyze_script(&clean_script);
+    let analysis = analyze_script(script_setup);
 
     if analysis.signals.is_empty() && analysis.computeds.is_empty() {
         return None;
@@ -1473,6 +1603,331 @@ fn build_dfs_index_map(
         map.insert(path.clone(), i);
     }
     map
+}
+
+// ── Stage D: Comment-anchored signal generation (compile mode) ───────────
+
+/// Collect all unique binding paths, sorted in DFS order.
+fn collect_binding_paths(bindings: &TemplateBindings) -> Vec<Vec<usize>> {
+    let mut paths = std::collections::BTreeSet::new();
+    for b in &bindings.events { paths.insert(b.path.clone()); }
+    for b in &bindings.texts { paths.insert(b.path.clone()); }
+    for b in &bindings.shows { paths.insert(b.path.clone()); }
+    for b in &bindings.htmls { paths.insert(b.path.clone()); }
+    for b in &bindings.text_directives { paths.insert(b.path.clone()); }
+    for b in &bindings.classes { paths.insert(b.path.clone()); }
+    for b in &bindings.styles { paths.insert(b.path.clone()); }
+    for b in &bindings.models { paths.insert(b.path.clone()); }
+    paths.into_iter().collect()
+}
+
+/// Walk the HTML element tree and find the byte offset (position of '<') for
+/// each element matching a target path.
+fn find_element_offsets(html: &str, target_paths: &[Vec<usize>]) -> HashMap<Vec<usize>, usize> {
+    let target_set: std::collections::HashSet<Vec<usize>> = target_paths.iter().cloned().collect();
+    let mut offsets = HashMap::new();
+    find_offsets_walk(html, 0, &[], &target_set, &mut offsets);
+    offsets
+}
+
+/// Recursive walker that tracks byte position and element path simultaneously.
+fn find_offsets_walk(
+    html: &str,
+    start: usize,
+    parent_path: &[usize],
+    targets: &std::collections::HashSet<Vec<usize>>,
+    offsets: &mut HashMap<Vec<usize>, usize>,
+) {
+    let bytes = html.as_bytes();
+    let mut pos = start;
+    let mut element_index: usize = 0;
+
+    while pos < bytes.len() {
+        if bytes[pos] == b'<' {
+            // Skip comments/doctype
+            if pos + 1 < bytes.len() && bytes[pos + 1] == b'!' {
+                if let Some(end) = html[pos..].find('>') {
+                    pos = pos + end + 1;
+                } else {
+                    break;
+                }
+                continue;
+            }
+            // Skip closing tags
+            if pos + 1 < bytes.len() && bytes[pos + 1] == b'/' {
+                // Hit a closing tag — we're done at this level
+                break;
+            }
+            // Opening tag
+            if let Some((elem, end_pos)) = parse_element(html, pos) {
+                let mut current_path = parent_path.to_vec();
+                current_path.push(element_index);
+
+                if targets.contains(&current_path) {
+                    offsets.insert(current_path.clone(), pos);
+                }
+
+                // Skip <transition> (not a real DOM element)
+                if elem.tag == "transition" {
+                    // Recurse into children with same element_index counter
+                    let gt = html[pos..].find('>').unwrap_or(0) + pos + 1;
+                    find_offsets_walk(html, gt, parent_path, targets, offsets);
+                } else {
+                    // Recurse into children
+                    let gt = html[pos..].find('>').unwrap_or(0) + pos + 1;
+                    find_offsets_walk(html, gt, &current_path, targets, offsets);
+                    element_index += 1;
+                }
+
+                pos = end_pos;
+            } else {
+                pos += 1;
+            }
+        } else {
+            pos += 1;
+        }
+    }
+}
+
+/// Inject `<!--v:N-->` comment markers before signal-bound elements in HTML.
+/// `binding_paths` are sorted in DFS order; N is the index in this list.
+/// Returns the modified HTML and the mapping from path to comment index.
+pub fn inject_signal_comments(
+    html: &str,
+    binding_paths: &[Vec<usize>],
+) -> (String, HashMap<Vec<usize>, usize>) {
+    let offsets = find_element_offsets(html, binding_paths);
+
+    // Build (byte_offset, comment_index) pairs, sorted by offset descending for safe insertion
+    let mut insertions: Vec<(usize, usize)> = Vec::new();
+    let mut path_to_idx = HashMap::new();
+    for (idx, path) in binding_paths.iter().enumerate() {
+        if let Some(&offset) = offsets.get(path) {
+            insertions.push((offset, idx));
+            path_to_idx.insert(path.clone(), idx);
+        }
+    }
+    insertions.sort_by(|a, b| b.0.cmp(&a.0)); // reverse order
+
+    let mut result = html.to_string();
+    for (offset, idx) in &insertions {
+        let comment = format!("<!--v:{}-->", idx);
+        result.insert_str(*offset, &comment);
+    }
+
+    (result, path_to_idx)
+}
+
+/// Compile mode: generate signal JS for ALL signal bindings using comment anchors.
+/// Each signal-bound element has a `<!--v:N-->` comment before it.
+/// JS uses TreeWalker to collect these comments and locate elements via nextElementSibling.
+pub fn generate_signals_comment(
+    script_setup: &str,
+    template_html: &str,
+    module_code: &[String],
+    global_name: &str,
+) -> Option<String> {
+    let analysis = analyze_script(script_setup);
+
+    if analysis.signals.is_empty() && analysis.computeds.is_empty() {
+        return None;
+    }
+
+    let reactive_names: Vec<&str> = analysis
+        .signals
+        .iter()
+        .map(|s| s.name.as_str())
+        .chain(analysis.computeds.iter().map(|c| c.name.as_str()))
+        .collect();
+
+    let bindings = walk_template(template_html, &reactive_names);
+
+    let binding_paths = collect_binding_paths(&bindings);
+    if binding_paths.is_empty() {
+        return None;
+    }
+
+    // Build path → comment index mapping (same order as inject_signal_comments)
+    let path_to_idx: HashMap<Vec<usize>, usize> = binding_paths
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.clone(), i))
+        .collect();
+
+    let total = binding_paths.len();
+
+    let mut js = String::new();
+    js.push_str("(function() {\n");
+    js.push_str(&format!("  var V = {};\n", global_name));
+
+    // Inlined module code
+    for (i, code) in module_code.iter().enumerate() {
+        js.push_str(&format!(
+            "  var __mod_{} = (function() {{ {} }})();\n",
+            i, code.trim()
+        ));
+    }
+
+    // Signals
+    for s in &analysis.signals {
+        js.push_str(&format!("  var {} = V.signal({});\n", s.name, s.initial_value));
+    }
+
+    // Computeds
+    for c in &analysis.computeds {
+        let body = transform_expr(&c.body, &reactive_names);
+        js.push_str(&format!(
+            "  var {} = V.computed(function() {{ return {}; }});\n",
+            c.name, body
+        ));
+    }
+
+    // Functions
+    for f in &analysis.functions {
+        let body = transform_expr(&f.body, &reactive_names);
+        js.push_str(&format!("  function {}({}) {{ {} }}\n", f.name, f.params, body));
+    }
+
+    // Watch declarations
+    for w in &analysis.watches {
+        let body = transform_expr(&w.body, &reactive_names);
+        js.push_str(&format!(
+            "  V.watch({}, function({}) {{ {} }});\n",
+            w.source, w.params, body
+        ));
+    }
+
+    // Comment anchor walker — collect signal elements
+    js.push_str("\n");
+    js.push_str(&format!("  var _ve = new Array({});\n", total));
+    js.push_str("  var _tw = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);\n");
+    js.push_str("  var _tn;\n");
+    js.push_str("  while (_tn = _tw.nextNode()) {\n");
+    js.push_str("    var _td = _tn.data;\n");
+    js.push_str("    if (_td.length > 2 && _td.charCodeAt(0) === 118 && _td.charCodeAt(1) === 58) {\n");
+    js.push_str("      _ve[parseInt(_td.substring(2))] = _tn.nextElementSibling;\n");
+    js.push_str("    }\n");
+    js.push_str("  }\n");
+
+    // Event bindings
+    for binding in &bindings.events {
+        if let Some(&idx) = path_to_idx.get(&binding.path) {
+            let handler_ref = if analysis.functions.iter().any(|f| f.name == binding.handler) {
+                binding.handler.clone()
+            } else {
+                let body = transform_expr(&binding.handler, &reactive_names);
+                format!("function() {{ {} }}", body)
+            };
+            js.push_str(&format!(
+                "  _ve[{}].addEventListener('{}', {});\n",
+                idx, binding.event, handler_ref
+            ));
+        }
+    }
+
+    // Text bindings
+    for binding in &bindings.texts {
+        if let Some(&idx) = path_to_idx.get(&binding.path) {
+            let js_expr = template_to_js_expr(&binding.template, &reactive_names);
+            js.push_str(&format!(
+                "  V.effect(function() {{ _ve[{}].textContent = {}; }});\n",
+                idx, js_expr
+            ));
+        }
+    }
+
+    // Show bindings
+    for binding in &bindings.shows {
+        if let Some(&idx) = path_to_idx.get(&binding.path) {
+            let transformed = transform_expr(&binding.expr, &reactive_names);
+            if let Some(ref name) = binding.transition {
+                js.push_str(&format!(
+                    "  V.effect(function() {{ V.transition(_ve[{}], {}, '{}'); }});\n",
+                    idx, transformed, name
+                ));
+            } else {
+                js.push_str(&format!(
+                    "  V.effect(function() {{ _ve[{}].style.display = {} ? '' : 'none'; }});\n",
+                    idx, transformed
+                ));
+            }
+        }
+    }
+
+    // :class bindings
+    for binding in &bindings.classes {
+        if let Some(&idx) = path_to_idx.get(&binding.path) {
+            let items = parse_class_expr(&binding.expr);
+            for item in &items {
+                match item {
+                    ClassItem::Toggle(class_name, cond_expr) => {
+                        let transformed = transform_expr(cond_expr, &reactive_names);
+                        js.push_str(&format!(
+                            "  V.effect(function() {{ _ve[{}].classList.toggle('{}', !!{}); }});\n",
+                            idx, class_name, transformed
+                        ));
+                    }
+                    ClassItem::Static(class_name) => {
+                        js.push_str(&format!("  _ve[{}].classList.add('{}');\n", idx, class_name));
+                    }
+                }
+            }
+        }
+    }
+
+    // :style bindings
+    for binding in &bindings.styles {
+        if let Some(&idx) = path_to_idx.get(&binding.path) {
+            let pairs = parse_style_expr(&binding.expr);
+            for (prop, val_expr) in &pairs {
+                let transformed = transform_expr(val_expr, &reactive_names);
+                js.push_str(&format!(
+                    "  V.effect(function() {{ _ve[{}].style.{} = {}; }});\n",
+                    idx, prop, transformed
+                ));
+            }
+        }
+    }
+
+    // v-model bindings
+    for binding in &bindings.models {
+        if let Some(&idx) = path_to_idx.get(&binding.path) {
+            let signal = &binding.signal_name;
+            js.push_str(&format!(
+                "  V.effect(function() {{ _ve[{}].value = {}.value; }});\n",
+                idx, signal
+            ));
+            js.push_str(&format!(
+                "  _ve[{}].addEventListener('input', function(e) {{ {}.value = e.target.value; }});\n",
+                idx, signal
+            ));
+        }
+    }
+
+    // v-html bindings
+    for binding in &bindings.htmls {
+        if let Some(&idx) = path_to_idx.get(&binding.path) {
+            let transformed = transform_expr(&binding.expr, &reactive_names);
+            js.push_str(&format!(
+                "  V.effect(function() {{ _ve[{}].innerHTML = {}; }});\n",
+                idx, transformed
+            ));
+        }
+    }
+
+    // v-text bindings
+    for binding in &bindings.text_directives {
+        if let Some(&idx) = path_to_idx.get(&binding.path) {
+            let transformed = transform_expr(&binding.expr, &reactive_names);
+            js.push_str(&format!(
+                "  V.effect(function() {{ _ve[{}].textContent = {}; }});\n",
+                idx, transformed
+            ));
+        }
+    }
+
+    js.push_str("})();\n");
+    Some(js)
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -1902,5 +2357,86 @@ const count = ref(0)
         let html = r#"<div><p>{{ count }}</p></div>"#;
         let js = generate_signals(script, html, &[], "Van").unwrap();
         assert!(js.contains("V.signal(0)"));
+    }
+
+    // ─── Arrow function tests (the critical fix) ────────────────────
+
+    #[test]
+    fn test_analyze_arrow_function_expression() {
+        let script = r#"
+const count = ref(0)
+const increment = () => count.value++
+"#;
+        let analysis = analyze_script(script);
+        assert_eq!(analysis.signals.len(), 1);
+        assert_eq!(analysis.functions.len(), 1);
+        assert_eq!(analysis.functions[0].name, "increment");
+        assert_eq!(analysis.functions[0].body, "count.value++");
+    }
+
+    #[test]
+    fn test_analyze_arrow_function_block() {
+        let script = r#"
+const count = ref(0)
+const add = (n) => { count.value += n }
+"#;
+        let analysis = analyze_script(script);
+        assert_eq!(analysis.functions.len(), 1);
+        assert_eq!(analysis.functions[0].name, "add");
+        assert_eq!(analysis.functions[0].params, "n");
+        assert!(analysis.functions[0].body.contains("count.value += n"));
+    }
+
+    #[test]
+    fn test_analyze_function_expression() {
+        let script = r#"
+const count = ref(0)
+const reset = function() { count.value = 0 }
+"#;
+        let analysis = analyze_script(script);
+        assert_eq!(analysis.functions.len(), 1);
+        assert_eq!(analysis.functions[0].name, "reset");
+    }
+
+    #[test]
+    fn test_analyze_ref_complex_initial_values() {
+        let script = r#"
+const items = ref([1, 2, 3])
+const config = ref({ theme: 'dark' })
+"#;
+        let analysis = analyze_script(script);
+        assert_eq!(analysis.signals.len(), 2);
+        assert_eq!(analysis.signals[0].name, "items");
+        assert_eq!(analysis.signals[0].initial_value, "[1, 2, 3]");
+        assert_eq!(analysis.signals[1].name, "config");
+        assert!(analysis.signals[1].initial_value.contains("theme"));
+    }
+
+    #[test]
+    fn test_generate_signals_arrow_click_handler() {
+        // THE critical test: @click with arrow function handler
+        let script = r#"
+const count = ref(0)
+const increment = () => count.value++
+"#;
+        let html = r#"<body><p>{{ count }}</p><button @click="increment">+1</button></body>"#;
+        let js = generate_signals(script, html, &[], "Van").unwrap();
+        // Arrow function should be declared in the IIFE
+        assert!(js.contains("function increment("));
+        // Event handler should reference the function directly
+        assert!(js.contains("addEventListener('click', increment)"));
+        // Should NOT generate wrapper: function() { increment }
+        assert!(!js.contains("function() { increment }"));
+    }
+
+    #[test]
+    fn test_generate_signals_arrow_with_params() {
+        let script = r#"
+const count = ref(0)
+const add = (n) => { count.value += n }
+"#;
+        let html = r#"<body><p>{{ count }}</p><button @click="add(5)">+5</button></body>"#;
+        let js = generate_signals(script, html, &[], "Van").unwrap();
+        assert!(js.contains("function add(n)"));
     }
 }
